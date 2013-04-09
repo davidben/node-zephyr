@@ -50,10 +50,9 @@ void CallWithError(Handle<Function> callback, Code_t code) {
   callback->Call(Context::GetCurrent()->Global(), 1, &err);
 }
 
-// XXX Yeah, I know I should check return values... but lazy...
-char *getstr(const Handle<Value> str) {
+std::string ValueToString(const Handle<Value> str) {
   String::Utf8Value temp(Handle<String>::Cast(str));
-  return strndup(*temp, temp.length());
+  return std::string(*temp, temp.length());
 }
 
 Local<Object> ZUniqueIdToBuffer(const ZUnique_Id_t& uid) {
@@ -183,52 +182,54 @@ Handle<Value> SubscribeTo(const Arguments& args) {
   }
 
   Local<Array> in_subs = Local<Array>::Cast(args[0]);
-  ZSubscription_t *subs = new ZSubscription_t[in_subs->Length()];
+  // RAII ALL THE THINGS. It's nice to be able to early-return.
+  std::vector<ZSubscription_t> subs;
+  std::vector<std::string> cleanup;
+  subs.reserve(in_subs->Length());
+  cleanup.reserve(in_subs->Length() * 3);
 
   for (uint32_t i = 0; i < in_subs->Length(); ++i) {
-    bool success = true;
-    Local<Array> sub;
     if (!in_subs->Get(i)->IsArray()) {
-      success = false;
-    } else {
-      sub = Local<Array>::Cast(in_subs->Get(i));
-      switch (sub->Length()) {
-        case 3:
-          if (!sub->Get(2)->IsString())
-            success = false;
-        case 2:
-          if (!sub->Get(1)->IsString())
-            success = false;
-          if (!sub->Get(0)->IsString())
-            success = false;
-          break;
-        default:
-          success = false;
-      }
-    }
-    if (!success) {
-      delete[] subs;
-      ThrowException(Exception::TypeError(
-          String::New("Subs must be [ class, instance, recipient? ]")));
+      ThrowException(Exception::TypeError(String::New("Expected array")));
       return scope.Close(Undefined());
     }
 
-    subs[i].zsub_recipient = sub->Length() == 3 ?
-                             getstr(sub->Get(2)) : NULL;
-    subs[i].zsub_classinst = getstr(sub->Get(1));
-    subs[i].zsub_class = getstr(sub->Get(0));
+    Local<Array> sub_array = Local<Array>::Cast(in_subs->Get(i));
+    ZSubscription_t sub = { NULL, NULL, NULL };
+    sub.zsub_recipient = const_cast<char*>("");
+    switch (sub_array->Length()) {
+      case 3:
+        if (!sub_array->Get(2)->IsString()) {
+          ThrowException(Exception::TypeError(String::New("Expected string")));
+          return scope.Close(Undefined());
+        }
+        cleanup.push_back(ValueToString(sub_array->Get(2)));
+        sub.zsub_recipient = const_cast<char*>(cleanup.back().c_str());
+        // fallthrough
+      case 2:
+        if (!sub_array->Get(1)->IsString()) {
+          ThrowException(Exception::TypeError(String::New("Expected string")));
+          return scope.Close(Undefined());
+        }
+        cleanup.push_back(ValueToString(sub_array->Get(1)));
+        sub.zsub_classinst = const_cast<char*>(cleanup.back().c_str());
+
+        if (!sub_array->Get(0)->IsString()) {
+          ThrowException(Exception::TypeError(String::New("Expected string")));
+          return scope.Close(Undefined());
+        }
+        cleanup.push_back(ValueToString(sub_array->Get(0)));
+        sub.zsub_class = const_cast<char*>(cleanup.back().c_str());
+        break;
+      default:
+        ThrowException(Exception::TypeError(
+            String::New("Subs must be [ class, instance, recipient? ]")));
+        return scope.Close(Undefined());
+    }
+    subs.push_back(sub);
   }
 
-
-  int ret = ZSubscribeTo(subs, in_subs->Length(), 0);
-
-  for (unsigned i = 0; i < in_subs->Length(); ++i) {
-    free(subs[i].zsub_recipient);
-    free(subs[i].zsub_classinst);
-    free(subs[i].zsub_class);
-  }
-  delete[] subs;
-
+  int ret = ZSubscribeTo(&subs[0], subs.size(), 0);
   if (ret != ZERR_NONE) {
     ThrowException(ComErrException(ret));
     return scope.Close(Undefined());
@@ -244,8 +245,7 @@ std::string GetStringProperty(Handle<Object> source,
   Local<Value> value = source->Get(key);
   if (value->IsUndefined())
     return default_value;
-  String::Utf8Value value_utf8(source->Get(key));
-  return std::string(*value_utf8, value_utf8.length());
+  return ValueToString(source->Get(key));
 }
 
 std::vector<ZUnique_Id_t> g_wait_on_uids;
