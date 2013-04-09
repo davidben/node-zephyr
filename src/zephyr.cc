@@ -20,10 +20,9 @@ using namespace v8;
 namespace {
 
 Persistent<Function> g_on_msg;
-
 uv_loop_t *g_loop;
-
 uv_poll_t g_zephyr_poll;
+bool g_initialized;
 
 #define NODE_ZEPHYR_SYMBOL(sym) \
   Persistent<String> g_symbol_ ## sym ;
@@ -59,6 +58,60 @@ Local<Object> ZUniqueIdToBuffer(const ZUnique_Id_t& uid) {
   return Local<Object>::New(
       node::Buffer::New(reinterpret_cast<const char*>(&uid),
                         sizeof(uid))->handle_);
+}
+
+#define ABORT_UNLESS_INITIALIZED()                      \
+  do {                                                  \
+    if (!g_initialized) {                               \
+      ThrowException(Exception::Error(String::New(      \
+          "Zephyr not initialized")));                  \
+      return scope.Close(Undefined());                  \
+    }                                                   \
+  } while(0)
+
+/*[ OPENPORT ]****************************************************************/
+
+void InstallZephyrListener();
+
+Handle<Value> OpenPort(const Arguments& args) {
+  HandleScope scope;
+
+  if (g_initialized) {
+    ThrowException(Exception::Error(String::New(
+        "Zephyr already initialized")));
+    return scope.Close(Undefined());
+  }
+
+  Code_t ret = ZInitialize();
+  if (ret != ZERR_NONE) {
+    ThrowException(ComErrException(ret));
+    return scope.Close(Undefined());
+  }
+
+  ret = ZOpenPort(NULL);
+  if (ret != ZERR_NONE) {
+    ThrowException(ComErrException(ret));
+    return scope.Close(Undefined());
+  }
+
+  InstallZephyrListener();
+  g_initialized = true;
+
+  return scope.Close(Undefined());
+}
+
+/*[ MISC ]*******************************************************************/
+
+Handle<Value> GetSender(const Arguments& args) {
+  HandleScope scope;
+  ABORT_UNLESS_INITIALIZED();
+  return scope.Close(String::New(ZGetSender()));
+}
+
+Handle<Value> GetRealm(const Arguments& args) {
+  HandleScope scope;
+  ABORT_UNLESS_INITIALIZED();
+  return scope.Close(String::New(ZGetRealm()));
 }
 
 /*[ CHECK ]*******************************************************************/
@@ -176,6 +229,8 @@ void InstallZephyrListener() {
 Handle<Value> SubscribeTo(const Arguments& args) {
   HandleScope scope;
 
+  ABORT_UNLESS_INITIALIZED();
+
   if (args.Length() != 1 || !args[0]->IsArray()) {
     ThrowException(Exception::TypeError(String::New("Invalid parameters")));
     return scope.Close(Undefined());
@@ -266,6 +321,8 @@ Code_t SendFunction(ZNotice_t* notice, char* packet, int len, int waitforack) {
 Handle<Value> SendNotice(const Arguments& args) {
   HandleScope scope;
 
+  ABORT_UNLESS_INITIALIZED();
+
   if (args.Length() != 1 || !args[0]->IsObject()) {
     ThrowException(Exception::TypeError(String::New("Notice must be object")));
     return scope.Close(Undefined());
@@ -329,16 +386,14 @@ void Init(Handle<Object> exports, Handle<Value> module) {
 
   g_loop = uv_default_loop();
 
-  if (ZInitialize() != ZERR_NONE || ZOpenPort(NULL) != ZERR_NONE) {
-    // we should probably handle this better...
-    perror("zephyr init");
-    return;
-  }
-
-  InstallZephyrListener();
-
-  exports->Set(g_symbol_sender, String::New(ZGetSender()));
-  exports->Set(g_symbol_realm, String::New(ZGetRealm()));
+  // TODO: Explicit close port and cancel subs commands. We don't
+  // really clean up properly right now.
+  exports->Set(g_symbol_openPort,
+               FunctionTemplate::New(OpenPort)->GetFunction());
+  exports->Set(g_symbol_getSender,
+               FunctionTemplate::New(GetSender)->GetFunction());
+  exports->Set(g_symbol_getRealm,
+               FunctionTemplate::New(GetRealm)->GetFunction());
   exports->Set(g_symbol_setNoticeCallback,
                FunctionTemplate::New(SetNoticeCallback)->GetFunction());
   exports->Set(g_symbol_subscribeTo,

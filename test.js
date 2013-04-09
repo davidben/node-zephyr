@@ -4,6 +4,7 @@ console.dir(zephyr);
 var cls = process.argv[2];
 var inst = process.argv[3];
 
+zephyr.openPort();
 zephyr.subscribeTo([ [ cls, inst, '*' ] ], function(err) {
   if (err) {
     console.dir(err);

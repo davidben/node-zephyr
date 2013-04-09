@@ -30,8 +30,11 @@ ZSRVACK_PRIORITY[zephyr.ZSRVACK_SENT] = 0;
 ZSRVACK_PRIORITY[zephyr.ZSRVACK_NOTSENT] = 1;
 ZSRVACK_PRIORITY[zephyr.ZSRVACK_FAIL] = 2;
 
-zephyr.sender = internal.sender;
-zephyr.realm = internal.realm;
+zephyr.openPort = internal.openPort;
+
+// TODO: Make these properties with a getter?
+zephyr.getSender = internal.getSender;
+zephyr.getRealm = internal.getRealm;
 
 zephyr.subscribeTo = function(subs, cb) {
   // TODO: Make this function actually asynchronous.
