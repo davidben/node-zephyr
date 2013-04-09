@@ -240,7 +240,7 @@ Handle<Value> SubscribeTo(const Arguments& args) {
 
 std::string GetStringProperty(Handle<Object> source,
                               Handle<String> key,
-			      const char *default_value) {
+                              const char *default_value) {
   Local<Value> value = source->Get(key);
   if (value->IsUndefined())
     return default_value;
@@ -282,7 +282,7 @@ Handle<Value> SendNotice(const Arguments& args) {
     for (uint32_t i = 0, len = body_array->Length(); i < len; i++) {
       String::Utf8Value value(body_array->Get(i));
       if (i > 0)
-	body.push_back('\0');
+        body.push_back('\0');
       body.append(*value, value.length());
     }
   }
@@ -290,7 +290,7 @@ Handle<Value> SendNotice(const Arguments& args) {
   std::string msg_class = GetStringProperty(obj, g_symbol_class, "MESSAGE");
   std::string instance = GetStringProperty(obj, g_symbol_instance, "PERSONAL");
   std::string format = GetStringProperty(obj, g_symbol_format,
-					 "http://zephyr.1ts.org/wiki/df");
+                                         "http://zephyr.1ts.org/wiki/df");
   std::string opcode = GetStringProperty(obj, g_symbol_opcode, "");
   std::string recipient = GetStringProperty(obj, g_symbol_recipient, "");
 
