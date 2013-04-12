@@ -114,7 +114,7 @@ zephyr.sendNotice = function(msg, onHmack) {
   return ev;
 };
 
-zephyr.subscribeTo = function(subs, cb) {
+function zephyrCtl(opcode, subs, cb) {
   // Instead of using ZSubscribeTo, manually assemble using our
   // existing asynchronous sendNotice.
 
@@ -141,13 +141,29 @@ zephyr.subscribeTo = function(subs, cb) {
   var notice = {
     class: zephyr.ZEPHYR_CTL_CLASS,
     instance: zephyr.ZEPHYR_CTL_CLIENT,
-    opcode: zephyr.CLIENT_SUBSCRIBE,
+    opcode: opcode,
     recipient: '',
     format: '',
     body: body,
   };
 
   zephyr.sendNotice(notice).once('servack', cb);
+}
+
+zephyr.subscribeTo = function(subs, cb) {
+  zephyrCtl(zephyr.CLIENT_SUBSCRIBE, subs, cb);
+};
+
+zephyr.subscribeToSansDefaults = function(subs, cb) {
+  zephyrCtl(zephyr.CLIENT_SUBSCRIBE_NODEFS, subs, cb);
+};
+
+zephyr.unsubscribeTo = function(subs, cb) {
+  zephyrCtl(zephyr.CLIENT_UNSUBSCRIBE, subs, cb);
+};
+
+zephyr.cancelSubscriptions = function(cb) {
+  zephyrCtl(zephyr.CLIENT_CANCELSUB, [], cb);
 };
 
 internal.setNoticeCallback(function(err, notice) {
