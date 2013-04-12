@@ -47,19 +47,6 @@ zephyr.openPort = internal.openPort;
 zephyr.getSender = internal.getSender;
 zephyr.getRealm = internal.getRealm;
 
-zephyr.subscribeTo = function(subs, cb) {
-  // TODO: Make this function actually asynchronous.
-  var err = null;
-  try {
-    internal.subscribeTo(subs);
-  } catch (e) {
-    err = e;
-  }
-  process.nextTick(function() {
-    cb(err);
-  });
-}
-
 var hmackTable = { };
 var servackTable = { };
 
@@ -125,6 +112,42 @@ zephyr.sendNotice = function(msg, onHmack) {
   }).done();
 
   return ev;
+};
+
+zephyr.subscribeTo = function(subs, cb) {
+  // Instead of using ZSubscribeTo, manually assemble using our
+  // existing asynchronous sendNotice.
+
+  // TODO(davidben): Manually fragment the subs list if it's too
+  // long. ZSubscribeTo calls Z_FormatHeader, which is internal.
+  //
+  // TODO(davidben): Key management.
+
+  var body = [];
+  for (var i = 0; i < subs.length; i++) {
+    var sub = subs[i];
+    var zClass = sub[0], zInst = sub[1], zRecip = sub[2];
+    body.push(zClass);
+    body.push(zInst);
+    if (zRecip != null && zRecip[0] === '*')
+      zRecip = zRecip.substring(1);
+    if (zRecip == null || (zRecip !== '' && zRecip[0] !== '@'))
+      zRecip = zephyr.getSender();
+    body.push(zRecip);
+  }
+  // ZFormatNoticeList sticks an extra NUL at the end.
+  body.push('');
+
+  var notice = {
+    class: zephyr.ZEPHYR_CTL_CLASS,
+    instance: zephyr.ZEPHYR_CTL_CLIENT,
+    opcode: zephyr.CLIENT_SUBSCRIBE,
+    recipient: '',
+    format: '',
+    body: body,
+  };
+
+  zephyr.sendNotice(notice).once('servack', cb);
 };
 
 internal.setNoticeCallback(function(err, notice) {
