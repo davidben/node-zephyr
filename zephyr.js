@@ -63,8 +63,13 @@ zephyr.sendNotice = function(msg, onHmack) {
   try {
     var uids = internal.sendNotice(msg);
   } catch (err) {
-    // FIXME: Maybe this should just be synchronous?
-    ev.emit('hmack', err);
+    // FIXME: Maybe this should just be synchronous? Reporting the
+    // error twice is silly, but if you fail this early, you fail
+    // both.
+    process.nextTick(function() {
+      ev.emit('hmack', err);
+      ev.emit('servack', err);
+    });
     return ev;
   }
 
