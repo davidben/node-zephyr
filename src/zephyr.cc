@@ -38,14 +38,16 @@ void CreateSymbols() {
 }
 
 const char* ErrorCodeToSymbol(Code_t code) {
-  switch (code) {
+  // Don't use switch-case because some errnos duplicate, but you
+  // don't know for sure (EWOULDBLOCK/EAGAIN). It's dumb. Hopefully
+  // the compiler's clever enough to optimize it anyway.
 #define NODE_ZEPHYR_ERROR(name) \
-  case name: return #name;
+  if (code == name) {		\
+    return #name;		\
+  }
 #include "error_list.h"
 #undef NODE_ZEPHYR_ERROR
-  default:
-    return "GENERIC";
-  }
+  return "GENERIC";
 }
 
 Local<Value> ComErrException(Code_t code) {
