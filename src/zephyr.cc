@@ -36,11 +36,22 @@ void CreateSymbols() {
 #undef NODE_ZEPHYR_SYMBOL
 }
 
+const char* ErrorCodeToSymbol(Code_t code) {
+  switch (code) {
+#define NODE_ZEPHYR_ERROR(name) \
+  case name: return #name;
+#include "error_list.h"
+#undef NODE_ZEPHYR_ERROR
+  default:
+    return "GENERIC";
+  }
+}
+
 Local<Value> ComErrException(Code_t code) {
   const char* msg = error_message(code);
   Local<Value> err = Exception::Error(String::New(msg));
   Local<Object> obj = err->ToObject();
-  obj->Set(g_symbol_code, Integer::New(code));
+  obj->Set(g_symbol_code, String::New(ErrorCodeToSymbol(code)));
   return err;
 }
 
