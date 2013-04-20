@@ -12,12 +12,9 @@
 
 extern "C" {
 #include <com_err.h>
+#include <krb5/krb5.h>
 #include <zephyr/zephyr.h>
 }
-
-// This doesn't need the extern "C", but com_err.h does, so make sure
-// that's included afterwards.
-#include <krb5/krb5.h>
 
 using namespace v8;
 
