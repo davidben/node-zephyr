@@ -347,7 +347,7 @@ Handle<Value> SendNotice(const Arguments& args) {
 
   // Assemble the body.
   std::string body;
-  Local<Value> body_value = obj->Get(String::New("body"));
+  Local<Value> body_value = obj->Get(g_symbol_body);
   if (body_value->IsArray()) {
     Local<Array> body_array = Local<Array>::Cast(body_value);
     for (uint32_t i = 0, len = body_array->Length(); i < len; i++) {
