@@ -165,6 +165,8 @@ zephyr.cancelSubscriptions = function(cb) {
   zephyrCtl(zephyr.CLIENT_CANCELSUB, [], cb);
 };
 
+zephyr.formatNotice = internal.formatNotice;
+
 internal.setNoticeCallback(function(err, notice) {
   if (err) {
     zephyr.emit("error", err);

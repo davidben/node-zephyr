@@ -1,5 +1,6 @@
 // Exported methods.
 NODE_ZEPHYR_SYMBOL(openPort)
+NODE_ZEPHYR_SYMBOL(formatNotice)
 NODE_ZEPHYR_SYMBOL(getSender)
 NODE_ZEPHYR_SYMBOL(getRealm)
 NODE_ZEPHYR_SYMBOL(sendNotice)

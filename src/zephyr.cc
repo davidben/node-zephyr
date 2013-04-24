@@ -355,6 +355,40 @@ Handle<Value> SendNotice(const Arguments& args) {
   return scope.Close(uids);
 }
 
+/*[ FORMAT ]******************************************************************/
+
+void FreeCallback(char* data, void*) {
+  free(data);
+}
+
+Handle<Value> FormatNotice(const Arguments& args) {
+  HandleScope scope;
+
+  ABORT_UNLESS_INITIALIZED();
+
+  if (args.Length() != 1 || !args[0]->IsObject()) {
+    ThrowException(Exception::TypeError(String::New("Notice must be object")));
+    return scope.Close(Undefined());
+  }
+
+  // Assemble the notice.
+  Local<Object> obj = Local<Object>::Cast(args[0]);
+  NoticeFields fields = ObjectToNoticeFields(obj);
+  ZNotice_t notice;
+  fields.ToNotice(&notice);
+
+  char* buffer;
+  int len;
+  Code_t ret = ZFormatNotice(&notice, &buffer, &len, ZAUTH);
+
+  if (ret != ZERR_NONE) {
+    ThrowException(ComErrException(ret));
+    return scope.Close(Undefined());
+  }
+  return scope.Close(
+      node::Buffer::New(buffer, len, FreeCallback, NULL)->handle_);
+}
+
 /*[ INIT ]********************************************************************/
 
 void Init(Handle<Object> exports, Handle<Value> module) {
@@ -374,6 +408,8 @@ void Init(Handle<Object> exports, Handle<Value> module) {
                FunctionTemplate::New(SetNoticeCallback)->GetFunction());
   exports->Set(g_symbol_sendNotice,
                FunctionTemplate::New(SendNotice)->GetFunction());
+  exports->Set(g_symbol_formatNotice,
+               FunctionTemplate::New(FormatNotice)->GetFunction());
 }
 
 NODE_MODULE(zephyr, Init)
