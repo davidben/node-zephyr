@@ -50,10 +50,8 @@ function OutgoingNotice() {
 }
 OutgoingNotice.prototype = Object.create(events.EventEmitter.prototype);
 
-zephyr.sendNotice = function(msg, onHmack) {
+function internalSendNotice(msg) {
   var ev = new OutgoingNotice();
-  if (onHmack)
-    ev.once('hmack', onHmack);
 
   try {
     var uids = internal.sendNotice(msg);
@@ -99,14 +97,28 @@ zephyr.sendNotice = function(msg, onHmack) {
   return ev;
 };
 
+zephyr.sendNotice = function(msg, onHmack) {
+  var ev = internalSendNotice({
+    class: msg.class,
+    instance: msg.instance,
+    format: msg.format,
+    opcode: msg.opcode,
+    recipient: msg.recipient,
+    body: msg.body,
+    // This key is internal.
+    saveKey: false,
+  });
+  if (onHmack)
+    ev.once('hmack', onHmack);
+  return ev;
+};
+
 function zephyrCtl(opcode, subs, cb) {
   // Instead of using ZSubscribeTo, manually assemble using our
   // existing asynchronous sendNotice.
 
   // TODO(davidben): Manually fragment the subs list if it's too
   // long. ZSubscribeTo calls Z_FormatHeader, which is internal.
-  //
-  // TODO(davidben): Key management.
 
   var body = [];
   for (var i = 0; i < subs.length; i++) {
@@ -130,9 +142,11 @@ function zephyrCtl(opcode, subs, cb) {
     recipient: '',
     format: '',
     body: body,
+    saveKey: (opcode == zephyr.CLIENT_SUBSCRIBE ||
+              opcode == zephyr.CLIENT_SUBSCRIBE_NODEFS),
   };
 
-  zephyr.sendNotice(notice).once('servack', cb);
+  internalSendNotice(notice).once('servack', cb);
 }
 
 zephyr.subscribeTo = function(subs, cb) {

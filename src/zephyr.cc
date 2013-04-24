@@ -377,7 +377,15 @@ Handle<Value> SendNotice(const Arguments& args) {
   notice.z_opcode = const_cast<char*>(opcode.c_str());
   notice.z_recipient = const_cast<char*>(recipient.c_str());
 
+#ifdef ZSUBAUTH
+  bool save_key = obj->Get(g_symbol_saveKey)->ToBoolean()->Value();
+
+  Code_t ret = ZSrvSendNotice(&notice, save_key ? ZSUBAUTH : ZAUTH,
+			      SendFunction);
+#else
+#warning Not compiling against libzephyr with key management support.
   Code_t ret = ZSrvSendNotice(&notice, ZAUTH, SendFunction);
+#endif
 
   if (ret != ZERR_NONE) {
     ThrowException(ComErrException(ret));
