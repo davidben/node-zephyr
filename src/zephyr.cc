@@ -355,7 +355,7 @@ Handle<Value> SendNotice(const Arguments& args) {
   return scope.Close(uids);
 }
 
-/*[ SEND ]********************************************************************/
+/*[ INIT ]********************************************************************/
 
 void Init(Handle<Object> exports, Handle<Value> module) {
   CreateSymbols();
