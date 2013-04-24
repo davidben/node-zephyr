@@ -36,11 +36,6 @@ zephyr.CLIENT_GIMMESUBS = 'GIMME';
 zephyr.CLIENT_GIMMEDEFS = 'GIMMEDEFS';
 zephyr.CLIENT_FLUSHSUBS = 'FLUSHSUBS';
 
-var ZSRVACK_PRIORITY = { }
-ZSRVACK_PRIORITY[zephyr.ZSRVACK_SENT] = 0;
-ZSRVACK_PRIORITY[zephyr.ZSRVACK_NOTSENT] = 1;
-ZSRVACK_PRIORITY[zephyr.ZSRVACK_FAIL] = 2;
-
 zephyr.openPort = internal.openPort;
 
 // TODO: Make these properties with a getter?
@@ -94,21 +89,6 @@ zephyr.sendNotice = function(msg, onHmack) {
   // libzephyr also drops non-initial SERVACKs on the floor. This
   // would be worth tweaking but, for now, only report on the initial
   // one.
-/*
-  Q.all(keys.map(function(key) {
-    servackTable[key] = Q.defer();
-    return servackTable[key].promise;
-  })).then(function(msgs) {
-    // Collapse messages into a single one. Use the most sad result.
-    var collapsed, pri = -1;
-    msgs.forEach(function(msg) {
-      if (ZSRVACK_PRIORITY[msg] > pri) {
-	collapsed = msg;
-	pri = ZSRVACK_PRIORITY[msg];
-      }
-    });
-    ev.emit('servack', null, collapsed);
-*/
   servackTable[keys[0]] = Q.defer();
   Q.all([servackTable[keys[0]].promise]).then(function(msg) {
     ev.emit('servack', null, msg);
