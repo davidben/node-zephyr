@@ -12,9 +12,24 @@ zephyr.subscribeTo([ [ cls, inst, '*' ] ], function(err) {
   }
 
   zephyr.on("notice", function(msg) {
-    console.log("%s / %s / %s [%s] (%s)\n%s",
-		msg.class, msg.instance, msg.sender,
-		msg.opcode, msg.body[0], msg.body[1]);
+    if (msg.kind == zephyr.HMACK) {
+      console.log("HMACK %s / %s / %s [%s]",
+		  msg.class, msg.instance, msg.sender, msg.opcode);
+    } else if (msg.kind == zephyr.SERVACK) {
+      console.log("SERVACK %s / %s / %s [%s] %s",
+		  msg.class, msg.instance, msg.sender, msg.opcode,
+		  msg.body[0]);
+    } else if (msg.kind == zephyr.SERVNAK) {
+      console.log("SERVNAK %s / %s / %s [%s] %s",
+		  msg.class, msg.instance, msg.sender, msg.opcode,
+		  msg.body[0]);
+    } else {
+      console.log("%s / %s / %s %s [%s] (%s)\n%s",
+		  msg.class, msg.instance, msg.sender,
+		  (msg.checkedAuth == zephyr.ZAUTH_YES) ?
+		  "AUTHENTIC" : "UNAUTHENTIC",
+		  msg.opcode, msg.body[0], msg.body[1]);
+    }
   });
   process.stdin.on('data', function(message) {
     zephyr.sendNotice({
