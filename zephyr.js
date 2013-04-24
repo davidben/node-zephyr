@@ -36,6 +36,9 @@ zephyr.CLIENT_GIMMESUBS = 'GIMME';
 zephyr.CLIENT_GIMMEDEFS = 'GIMMEDEFS';
 zephyr.CLIENT_FLUSHSUBS = 'FLUSHSUBS';
 
+var Z_FRAGFUDGE = 13;
+var Z_MAXPKTLEN = 1024;
+
 zephyr.openPort = internal.openPort;
 
 // TODO: Make these properties with a getter?
@@ -45,25 +48,25 @@ zephyr.getRealm = internal.getRealm;
 var hmackTable = { };
 var servackTable = { };
 
-function OutgoingNotice() {
+function OutgoingNotice(hmack, servack) {
   events.EventEmitter.call(this);
+
+  Q.nodeify(hmack, this.emit.bind(this, 'hmack'));
+  Q.nodeify(servack, this.emit.bind(this, 'servack'));
 }
 OutgoingNotice.prototype = Object.create(events.EventEmitter.prototype);
 
 function internalSendNotice(msg) {
-  var ev = new OutgoingNotice();
-
   try {
     var uids = internal.sendNotice(msg);
   } catch (err) {
     // FIXME: Maybe this should just be synchronous? Reporting the
     // error twice is silly, but if you fail this early, you fail
     // both.
-    process.nextTick(function() {
-      ev.emit('hmack', err);
-      ev.emit('servack', err);
-    });
-    return ev;
+    return {
+      hmack: Q.reject(err),
+      servack: Q.reject(err),
+    };
   }
 
   // Set up a bunch of deferreds for ACKs.
@@ -73,32 +76,26 @@ function internalSendNotice(msg) {
   // XXX: libzephyr gets confused with fragmentation code and HMACKs
   // and doesn't expect ZSendPacket to not block. This requires a fix
   // in libzephyr.
-  Q.all(keys.map(function(key) {
+  var hmack = Q.all(keys.map(function(key) {
     hmackTable[key] = Q.defer();
     return hmackTable[key].promise;
-  })).then(function() {
-    ev.emit('hmack', null);
-  }, function(err) {
-    // I don't think this ever happens. Meh.
-    ev.emit('hmack', err);
-  }).done();
+  }));
 
   // SERVACK
   // libzephyr also drops non-initial SERVACKs on the floor. This
   // would be worth tweaking but, for now, only report on the initial
   // one.
   servackTable[keys[0]] = Q.defer();
-  Q.all([servackTable[keys[0]].promise]).then(function(msg) {
-    ev.emit('servack', null, msg);
-  }, function(err) {
-    ev.emit('servack', err);
-  }).done();
+  var servack = Q.all([servackTable[keys[0]].promise]);
 
-  return ev;
+  return {
+    hmack: hmack,
+    servack: servack,
+  };
 };
 
 zephyr.sendNotice = function(msg, onHmack) {
-  var ev = internalSendNotice({
+  var acks = internalSendNotice({
     class: msg.class,
     instance: msg.instance,
     format: msg.format,
@@ -108,6 +105,7 @@ zephyr.sendNotice = function(msg, onHmack) {
     // This key is internal.
     saveKey: false,
   });
+  var ev = new OutgoingNotice(acks.hmack, acks.servack);
   if (onHmack)
     ev.once('hmack', onHmack);
   return ev;
@@ -116,37 +114,66 @@ zephyr.sendNotice = function(msg, onHmack) {
 function zephyrCtl(opcode, subs, cb) {
   // Instead of using ZSubscribeTo, manually assemble using our
   // existing asynchronous sendNotice.
-
-  // TODO(davidben): Manually fragment the subs list if it's too
-  // long. ZSubscribeTo calls Z_FormatHeader, which is internal.
-
-  var body = [];
-  for (var i = 0; i < subs.length; i++) {
-    var sub = subs[i];
-    var zClass = sub[0], zInst = sub[1], zRecip = sub[2];
-    body.push(zClass);
-    body.push(zInst);
-    if (zRecip != null && zRecip[0] === '*')
-      zRecip = zRecip.substring(1);
-    if (zRecip == null || (zRecip !== '' && zRecip[0] !== '@'))
-      zRecip = zephyr.getSender();
-    body.push(zRecip);
-  }
-  // ZFormatNoticeList sticks an extra NUL at the end.
-  body.push('');
-
   var notice = {
     class: zephyr.ZEPHYR_CTL_CLASS,
     instance: zephyr.ZEPHYR_CTL_CLIENT,
     opcode: opcode,
     recipient: '',
     format: '',
-    body: body,
-    saveKey: (opcode == zephyr.CLIENT_SUBSCRIBE ||
-              opcode == zephyr.CLIENT_SUBSCRIBE_NODEFS),
+    body: [],
+    saveKey: false,
   };
+  // Compute the header length. We fragment these manually.
+  var hdrlen = zephyr.formatNotice(notice).length;
+  var sizeAvail = Z_MAXPKTLEN - Z_FRAGFUDGE - hdrlen;
 
-  internalSendNotice(notice).once('servack', cb);
+  notice.saveKey = (opcode == zephyr.CLIENT_SUBSCRIBE ||
+                    opcode == zephyr.CLIENT_SUBSCRIBE_NODEFS);
+
+  // Normalize recipients.
+  subs = subs.map(function(sub) {
+    var zClass = sub[0], zInst = sub[1], zRecip = sub[2];
+    if (zRecip != null && zRecip[0] === '*')
+      zRecip = zRecip.substring(1);
+    if (zRecip == null || (zRecip !== '' && zRecip[0] !== '@'))
+      zRecip = zephyr.getSender();
+    return [zClass, zInst, zRecip];
+  });
+
+  var servacks = [];
+  var size = sizeAvail;
+  subs.forEach(function(sub) {
+    var subSize = sub[0].length + sub[1].length + sub[2].length + 3;
+
+    // Send what we have if this doesn't fit.
+    if (size < subSize) {
+      if (notice.body.length == 0) {
+        // TODO(davidben): Actually report this error or something.
+        return;
+      } else {
+        // ZFormatNoticeList sticks an extra NUL at the end.
+        notice.body.push('');
+        servacks.push(internalSendNotice(notice).servack);
+
+        // Reset.
+        notice.body = [];
+        size = sizeAvail;
+      }
+    }
+
+    size -= subSize;
+    notice.body.push(sub[0]);
+    notice.body.push(sub[1]);
+    notice.body.push(sub[2]);
+  });
+  // Send the remainder. Also if we never sent anything because there
+  // were no subs, send a packet anyway.
+  if (notice.body.length > 0 || subs.length == 0) {
+    notice.body.push('');
+    servacks.push(internalSendNotice(notice).servack);
+  }
+
+  Q.nodeify(Q.all(servacks), cb);
 }
 
 zephyr.subscribeTo = function(subs, cb) {
