@@ -162,9 +162,7 @@ function zephyrCtl(opcode, subs, cb) {
     }
 
     size -= subSize;
-    notice.body.push(sub[0]);
-    notice.body.push(sub[1]);
-    notice.body.push(sub[2]);
+    notice.body.push(sub[0], sub[1], sub[2]);
   });
   // Send the remainder. Also if we never sent anything because there
   // were no subs, send a packet anyway.
