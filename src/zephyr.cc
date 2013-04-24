@@ -238,74 +238,6 @@ void InstallZephyrListener() {
   }
 }
 
-/*[ SUB ]*********************************************************************/
-
-Handle<Value> SubscribeTo(const Arguments& args) {
-  HandleScope scope;
-
-  ABORT_UNLESS_INITIALIZED();
-
-  if (args.Length() != 1 || !args[0]->IsArray()) {
-    ThrowException(Exception::TypeError(String::New("Invalid parameters")));
-    return scope.Close(Undefined());
-  }
-
-  Local<Array> in_subs = Local<Array>::Cast(args[0]);
-  // RAII ALL THE THINGS. It's nice to be able to early-return.
-  std::vector<ZSubscription_t> subs;
-  std::vector<std::string> cleanup;
-  subs.reserve(in_subs->Length());
-  cleanup.reserve(in_subs->Length() * 3);
-
-  for (uint32_t i = 0; i < in_subs->Length(); ++i) {
-    if (!in_subs->Get(i)->IsArray()) {
-      ThrowException(Exception::TypeError(String::New("Expected array")));
-      return scope.Close(Undefined());
-    }
-
-    Local<Array> sub_array = Local<Array>::Cast(in_subs->Get(i));
-    ZSubscription_t sub = { NULL, NULL, NULL };
-    sub.zsub_recipient = const_cast<char*>("");
-    switch (sub_array->Length()) {
-      case 3:
-        if (!sub_array->Get(2)->IsString()) {
-          ThrowException(Exception::TypeError(String::New("Expected string")));
-          return scope.Close(Undefined());
-        }
-        cleanup.push_back(ValueToString(sub_array->Get(2)));
-        sub.zsub_recipient = const_cast<char*>(cleanup.back().c_str());
-        // fallthrough
-      case 2:
-        if (!sub_array->Get(1)->IsString()) {
-          ThrowException(Exception::TypeError(String::New("Expected string")));
-          return scope.Close(Undefined());
-        }
-        cleanup.push_back(ValueToString(sub_array->Get(1)));
-        sub.zsub_classinst = const_cast<char*>(cleanup.back().c_str());
-
-        if (!sub_array->Get(0)->IsString()) {
-          ThrowException(Exception::TypeError(String::New("Expected string")));
-          return scope.Close(Undefined());
-        }
-        cleanup.push_back(ValueToString(sub_array->Get(0)));
-        sub.zsub_class = const_cast<char*>(cleanup.back().c_str());
-        break;
-      default:
-        ThrowException(Exception::TypeError(
-            String::New("Subs must be [ class, instance, recipient? ]")));
-        return scope.Close(Undefined());
-    }
-    subs.push_back(sub);
-  }
-
-  int ret = ZSubscribeTo(&subs[0], subs.size(), 0);
-  if (ret != ZERR_NONE) {
-    ThrowException(ComErrException(ret));
-    return scope.Close(Undefined());
-  }
-  return scope.Close(Undefined());
-}
-
 /*[ SEND ]********************************************************************/
 
 std::string GetStringProperty(Handle<Object> source,
@@ -418,8 +350,6 @@ void Init(Handle<Object> exports, Handle<Value> module) {
                FunctionTemplate::New(GetRealm)->GetFunction());
   exports->Set(g_symbol_setNoticeCallback,
                FunctionTemplate::New(SetNoticeCallback)->GetFunction());
-  exports->Set(g_symbol_subscribeTo,
-               FunctionTemplate::New(SubscribeTo)->GetFunction());
   exports->Set(g_symbol_sendNotice,
                FunctionTemplate::New(SendNotice)->GetFunction());
 }
