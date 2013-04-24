@@ -74,6 +74,31 @@ Local<Object> ZUniqueIdToBuffer(const ZUnique_Id_t& uid) {
                         sizeof(uid))->handle_);
 }
 
+// A struct containing data to populate a ZNotice_t. Mostly for
+// ownership purposes.
+struct NoticeFields {
+  ZNotice_Kind_t kind;
+  std::string msg_class;
+  std::string instance;
+  std::string default_format;
+  std::string opcode;
+  std::string recipient;
+  std::string message;
+
+  // Resulting ZNotice_t only valid as long as the NoticeFields.
+  void ToNotice(ZNotice_t* notice) {
+    memset(notice, 0, sizeof(*notice));
+    notice->z_kind = kind;
+    notice->z_class = const_cast<char*>(msg_class.c_str());
+    notice->z_class_inst = const_cast<char*>(instance.c_str());
+    notice->z_default_format = const_cast<char*>(default_format.c_str());
+    notice->z_opcode = const_cast<char*>(opcode.c_str());
+    notice->z_recipient = const_cast<char*>(recipient.c_str());
+    notice->z_message = const_cast<char*>(message.data());
+    notice->z_message_len = message.length();
+  }
+};
+
 #define ABORT_UNLESS_INITIALIZED()                      \
   do {                                                  \
     if (!g_initialized) {                               \
@@ -249,6 +274,32 @@ std::string GetStringProperty(Handle<Object> source,
   return ValueToString(source->Get(key));
 }
 
+NoticeFields ObjectToNoticeFields(Handle<Object> obj) {
+  NoticeFields ret;
+
+  ret.kind = ACKED;
+  ret.msg_class = GetStringProperty(obj, g_symbol_class, "MESSAGE");
+  ret.instance = GetStringProperty(obj, g_symbol_instance, "PERSONAL");
+  ret.default_format = GetStringProperty(obj, g_symbol_format,
+                                         "http://zephyr.1ts.org/wiki/df");
+  ret.opcode = GetStringProperty(obj, g_symbol_opcode, "");
+  ret.recipient = GetStringProperty(obj, g_symbol_recipient, "");
+
+  // Assemble the body.
+  Local<Value> body_value = obj->Get(g_symbol_body);
+  if (body_value->IsArray()) {
+    Local<Array> body_array = Local<Array>::Cast(body_value);
+    for (uint32_t i = 0, len = body_array->Length(); i < len; i++) {
+      String::Utf8Value value(body_array->Get(i));
+      if (i > 0)
+        ret.message.push_back('\0');
+      ret.message.append(*value, value.length());
+    }
+  }
+
+  return ret;
+}
+
 std::vector<ZUnique_Id_t> g_wait_on_uids;
 
 Code_t SendFunction(ZNotice_t* notice, char* packet, int len, int waitforack) {
@@ -274,40 +325,11 @@ Handle<Value> SendNotice(const Arguments& args) {
     return scope.Close(Undefined());
   }
 
-  // Pull fields out of the object.
-  Local<Object> obj = Local<Object>::Cast(args[0]);
-
-  // Assemble the body.
-  std::string body;
-  Local<Value> body_value = obj->Get(g_symbol_body);
-  if (body_value->IsArray()) {
-    Local<Array> body_array = Local<Array>::Cast(body_value);
-    for (uint32_t i = 0, len = body_array->Length(); i < len; i++) {
-      String::Utf8Value value(body_array->Get(i));
-      if (i > 0)
-        body.push_back('\0');
-      body.append(*value, value.length());
-    }
-  }
-
-  std::string msg_class = GetStringProperty(obj, g_symbol_class, "MESSAGE");
-  std::string instance = GetStringProperty(obj, g_symbol_instance, "PERSONAL");
-  std::string format = GetStringProperty(obj, g_symbol_format,
-                                         "http://zephyr.1ts.org/wiki/df");
-  std::string opcode = GetStringProperty(obj, g_symbol_opcode, "");
-  std::string recipient = GetStringProperty(obj, g_symbol_recipient, "");
-
   // Assemble the notice.
+  Local<Object> obj = Local<Object>::Cast(args[0]);
+  NoticeFields fields = ObjectToNoticeFields(obj);
   ZNotice_t notice;
-  memset(&notice, 0, sizeof(notice));
-  notice.z_message_len = body.length();
-  notice.z_message = const_cast<char*>(body.data());
-  notice.z_kind = ACKED;
-  notice.z_class = const_cast<char*>(msg_class.c_str());
-  notice.z_class_inst = const_cast<char*>(instance.c_str());
-  notice.z_default_format = const_cast<char*>(format.c_str());
-  notice.z_opcode = const_cast<char*>(opcode.c_str());
-  notice.z_recipient = const_cast<char*>(recipient.c_str());
+  fields.ToNotice(&notice);
 
 #ifdef ZSUBAUTH
   bool save_key = obj->Get(g_symbol_saveKey)->ToBoolean()->Value();
