@@ -159,10 +159,6 @@ void ZephyrToObject(ZNotice_t *notice, Handle<Object> target) {
   target->Set(g_symbol_version, String::New(notice->z_version));
   target->Set(g_symbol_port, Number::New(notice->z_port));
   target->Set(g_symbol_checkedAuth, Number::New(notice->z_checked_auth));
-  target->Set(g_symbol_authentLen, Number::New(notice->z_authent_len));
-  // FIXME: This likely does terrible things with unicode. I think
-  // it's not actually ASCII.
-  target->Set(g_symbol_asciiAuthent, String::New(notice->z_ascii_authent));
   target->Set(g_symbol_class, String::New(notice->z_class));
   target->Set(g_symbol_instance, String::New(notice->z_class_inst));
   target->Set(g_symbol_opcode, String::New(notice->z_opcode));
