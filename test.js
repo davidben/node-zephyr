@@ -41,7 +41,7 @@ zephyr.subscribeTo([ [ cls, inst, '*' ] ], function(err) {
 	'badass rockstar zephyr',
 	message
       ]
-    }, "ZAUTH", function(err) {
+    }, zephyr.ZAUTH, function(err) {
       if (err) {
 	console.dir(err);
 	return;

@@ -11,6 +11,10 @@ zephyr.ZAUTH_FAILED = -1;
 zephyr.ZAUTH_YES = 1;
 zephyr.ZAUTH_NO = 0;
 
+zephyr.ZAUTH = 'ZAUTH';
+zephyr.ZNOAUTH = 'ZNOAUTH';
+zephyr.ZSUBAUTH = 'ZSUBAUTH';
+
 zephyr.UNSAFE = 0;
 zephyr.UNACKED = 1;
 zephyr.ACKED = 2;
@@ -115,13 +119,13 @@ function zephyrCtl(opcode, subs, cb) {
     saveKey: false,
   };
   // Compute the header length. We fragment these manually.
-  var hdrlen = zephyr.formatNotice(notice, "ZAUTH").length;
+  var hdrlen = zephyr.formatNotice(notice, zephyr.ZAUTH).length;
   var sizeAvail = Z_MAXPKTLEN - Z_FRAGFUDGE - hdrlen;
 
-  var certRoutine = "ZAUTH";
+  var certRoutine = zephyr.ZAUTH;
   if (opcode == zephyr.CLIENT_SUBSCRIBE ||
       opcode == zephyr.CLIENT_SUBSCRIBE_NODEFS)
-    certRoutine = "ZSUBAUTH";
+    certRoutine = zephyr.ZSUBAUTH;
 
   // Normalize recipients.
   subs = subs.map(function(sub) {
