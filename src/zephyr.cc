@@ -83,6 +83,7 @@ struct NoticeFields {
   std::string default_format;
   std::string opcode;
   std::string recipient;
+  std::string sender;
   std::string message;
 
   // Resulting ZNotice_t only valid as long as the NoticeFields.
@@ -94,6 +95,7 @@ struct NoticeFields {
     notice->z_default_format = const_cast<char*>(default_format.c_str());
     notice->z_opcode = const_cast<char*>(opcode.c_str());
     notice->z_recipient = const_cast<char*>(recipient.c_str());
+    notice->z_sender = const_cast<char*>(sender.c_str());
     notice->z_message = const_cast<char*>(message.data());
     notice->z_message_len = message.length();
   }
@@ -280,6 +282,7 @@ NoticeFields ObjectToNoticeFields(Handle<Object> obj) {
                                          "http://zephyr.1ts.org/wiki/df");
   ret.opcode = GetStringProperty(obj, g_symbol_opcode, "");
   ret.recipient = GetStringProperty(obj, g_symbol_recipient, "");
+  ret.sender = GetStringProperty(obj, g_symbol_sender, ZGetSender());
 
   // Assemble the body.
   Local<Value> body_value = obj->Get(g_symbol_body);

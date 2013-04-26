@@ -101,6 +101,7 @@ zephyr.sendNotice = function(msg, onHmack) {
     format: msg.format,
     opcode: msg.opcode,
     recipient: msg.recipient,
+    sender: msg.sender,
     body: msg.body,
     // This key is internal.
     saveKey: false,
