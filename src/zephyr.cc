@@ -74,6 +74,27 @@ Local<Object> ZUniqueIdToBuffer(const ZUnique_Id_t& uid) {
                         sizeof(uid))->handle_);
 }
 
+bool CertRoutineFromString(const std::string& str, Z_AuthProc* proc) {
+  if (str == "ZNOAUTH") {
+    *proc = ZNOAUTH;
+    return true;
+  }
+  if (str == "ZAUTH") {
+    *proc = ZAUTH;
+    return true;
+  }
+  if (str == "ZSUBAUTH") {
+#ifdef ZSUBAUTH
+    *proc = ZSUBAUTH;
+#else
+#warning Not compiling against libzephyr with key management support.
+    *proc = ZAUTH;
+#endif
+    return true;
+  }
+  return false;
+}
+
 // A struct containing data to populate a ZNotice_t. Mostly for
 // ownership purposes.
 struct NoticeFields {
@@ -319,8 +340,9 @@ Handle<Value> SendNotice(const Arguments& args) {
 
   ABORT_UNLESS_INITIALIZED();
 
-  if (args.Length() != 1 || !args[0]->IsObject()) {
-    ThrowException(Exception::TypeError(String::New("Notice must be object")));
+  if (args.Length() != 2 || !args[0]->IsObject()) {
+    ThrowException(Exception::TypeError(String::New(
+        "Arguments: notice, certRoutine")));
     return scope.Close(Undefined());
   }
 
@@ -330,15 +352,13 @@ Handle<Value> SendNotice(const Arguments& args) {
   ZNotice_t notice;
   fields.ToNotice(&notice);
 
-#ifdef ZSUBAUTH
-  bool save_key = obj->Get(g_symbol_saveKey)->ToBoolean()->Value();
+  Z_AuthProc cert_routine;
+  if (!CertRoutineFromString(ValueToString(args[1]), &cert_routine)) {
+    ThrowException(Exception::Error(String::New("Invalid certRoutine")));
+    return scope.Close(Undefined());
+  }
 
-  Code_t ret = ZSrvSendNotice(&notice, save_key ? ZSUBAUTH : ZAUTH,
-			      SendFunction);
-#else
-#warning Not compiling against libzephyr with key management support.
-  Code_t ret = ZSrvSendNotice(&notice, ZAUTH, SendFunction);
-#endif
+  Code_t ret = ZSrvSendNotice(&notice, cert_routine, SendFunction);
 
   if (ret != ZERR_NONE) {
     ThrowException(ComErrException(ret));
@@ -365,8 +385,9 @@ Handle<Value> FormatNotice(const Arguments& args) {
 
   ABORT_UNLESS_INITIALIZED();
 
-  if (args.Length() != 1 || !args[0]->IsObject()) {
-    ThrowException(Exception::TypeError(String::New("Notice must be object")));
+  if (args.Length() != 2 || !args[0]->IsObject()) {
+    ThrowException(Exception::TypeError(String::New(
+        "Arguments; notice, certRoutine")));
     return scope.Close(Undefined());
   }
 
@@ -376,9 +397,15 @@ Handle<Value> FormatNotice(const Arguments& args) {
   ZNotice_t notice;
   fields.ToNotice(&notice);
 
+  Z_AuthProc cert_routine;
+  if (!CertRoutineFromString(ValueToString(args[1]), &cert_routine)) {
+    ThrowException(Exception::Error(String::New("Invalid certRoutine")));
+    return scope.Close(Undefined());
+  }
+
   char* buffer;
   int len;
-  Code_t ret = ZFormatNotice(&notice, &buffer, &len, ZAUTH);
+  Code_t ret = ZFormatNotice(&notice, &buffer, &len, cert_routine);
 
   if (ret != ZERR_NONE) {
     ThrowException(ComErrException(ret));

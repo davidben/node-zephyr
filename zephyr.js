@@ -56,9 +56,9 @@ function OutgoingNotice(hmack, servack) {
 }
 OutgoingNotice.prototype = Object.create(events.EventEmitter.prototype);
 
-function internalSendNotice(msg) {
+function internalSendNotice(msg, certRoutine) {
   try {
-    var uids = internal.sendNotice(msg);
+    var uids = internal.sendNotice(msg, certRoutine);
   } catch (err) {
     // FIXME: Maybe this should just be synchronous? Reporting the
     // error twice is silly, but if you fail this early, you fail
@@ -94,18 +94,8 @@ function internalSendNotice(msg) {
   };
 };
 
-zephyr.sendNotice = function(msg, onHmack) {
-  var acks = internalSendNotice({
-    class: msg.class,
-    instance: msg.instance,
-    format: msg.format,
-    opcode: msg.opcode,
-    recipient: msg.recipient,
-    sender: msg.sender,
-    body: msg.body,
-    // This key is internal.
-    saveKey: false,
-  });
+zephyr.sendNotice = function(msg, certRoutine, onHmack) {
+  var acks = internalSendNotice(msg, certRoutine);
   var ev = new OutgoingNotice(acks.hmack, acks.servack);
   if (onHmack)
     ev.once('hmack', onHmack);
@@ -125,11 +115,13 @@ function zephyrCtl(opcode, subs, cb) {
     saveKey: false,
   };
   // Compute the header length. We fragment these manually.
-  var hdrlen = zephyr.formatNotice(notice).length;
+  var hdrlen = zephyr.formatNotice(notice, "ZAUTH").length;
   var sizeAvail = Z_MAXPKTLEN - Z_FRAGFUDGE - hdrlen;
 
-  notice.saveKey = (opcode == zephyr.CLIENT_SUBSCRIBE ||
-                    opcode == zephyr.CLIENT_SUBSCRIBE_NODEFS);
+  var certRoutine = "ZAUTH";
+  if (opcode == zephyr.CLIENT_SUBSCRIBE ||
+      opcode == zephyr.CLIENT_SUBSCRIBE_NODEFS)
+    certRoutine = "ZSUBAUTH";
 
   // Normalize recipients.
   subs = subs.map(function(sub) {
@@ -154,7 +146,7 @@ function zephyrCtl(opcode, subs, cb) {
       } else {
         // ZFormatNoticeList sticks an extra NUL at the end.
         notice.body.push('');
-        servacks.push(internalSendNotice(notice).servack);
+        servacks.push(internalSendNotice(notice, certRoutine).servack);
 
         // Reset.
         notice.body = [];
@@ -169,7 +161,7 @@ function zephyrCtl(opcode, subs, cb) {
   // were no subs, send a packet anyway.
   if (notice.body.length > 0 || subs.length == 0) {
     notice.body.push('');
-    servacks.push(internalSendNotice(notice).servack);
+    servacks.push(internalSendNotice(notice, certRoutine).servack);
   }
 
   Q.nodeify(Q.all(servacks), cb);
