@@ -31,7 +31,7 @@ zephyr.subscribeTo([ [ cls, inst, '*' ] ], function(err) {
     console.dir(err);
     return;
   }
-  console.log('Subscribed to %s  %s', cls, inst);
+  console.log('Subscribed to %s %s', cls, inst);
 
   process.stdin.on('data', function(message) {
     zephyr.sendNotice({

@@ -5,6 +5,7 @@ NODE_ZEPHYR_SYMBOL(getSender)
 NODE_ZEPHYR_SYMBOL(getRealm)
 NODE_ZEPHYR_SYMBOL(sendNotice)
 NODE_ZEPHYR_SYMBOL(setNoticeCallback)
+NODE_ZEPHYR_SYMBOL(subscriptions)
 
 // Keys on notice objects.
 NODE_ZEPHYR_SYMBOL(version)

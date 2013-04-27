@@ -13,7 +13,6 @@ zephyr.ZAUTH_NO = 0;
 
 zephyr.ZAUTH = 'ZAUTH';
 zephyr.ZNOAUTH = 'ZNOAUTH';
-zephyr.ZSUBAUTH = 'ZSUBAUTH';
 
 zephyr.UNSAFE = 0;
 zephyr.UNACKED = 1;
@@ -107,26 +106,6 @@ zephyr.sendNotice = function(msg, certRoutine, onHmack) {
 };
 
 function zephyrCtl(opcode, subs, cb) {
-  // Instead of using ZSubscribeTo, manually assemble using our
-  // existing asynchronous sendNotice.
-  var notice = {
-    class: zephyr.ZEPHYR_CTL_CLASS,
-    instance: zephyr.ZEPHYR_CTL_CLIENT,
-    opcode: opcode,
-    recipient: '',
-    format: '',
-    body: [],
-    saveKey: false,
-  };
-  // Compute the header length. We fragment these manually.
-  var hdrlen = zephyr.formatNotice(notice, zephyr.ZAUTH).length;
-  var sizeAvail = Z_MAXPKTLEN - Z_FRAGFUDGE - hdrlen;
-
-  var certRoutine = zephyr.ZAUTH;
-  if (opcode == zephyr.CLIENT_SUBSCRIBE ||
-      opcode == zephyr.CLIENT_SUBSCRIBE_NODEFS)
-    certRoutine = zephyr.ZSUBAUTH;
-
   // Normalize recipients.
   subs = subs.map(function(sub) {
     var zClass = sub[0], zInst = sub[1], zRecip = sub[2];
@@ -137,38 +116,20 @@ function zephyrCtl(opcode, subs, cb) {
     return [zClass, zInst, zRecip];
   });
 
-  var servacks = [];
-  var size = sizeAvail;
-  subs.forEach(function(sub) {
-    var subSize = sub[0].length + sub[1].length + sub[2].length + 3;
-
-    // Send what we have if this doesn't fit.
-    if (size < subSize) {
-      if (notice.body.length == 0) {
-        // TODO(davidben): Actually report this error or something.
-        return;
-      } else {
-        // ZFormatNoticeList sticks an extra NUL at the end.
-        notice.body.push('');
-        servacks.push(internalSendNotice(notice, certRoutine).servack);
-
-        // Reset.
-        notice.body = [];
-        size = sizeAvail;
-      }
-    }
-
-    size -= subSize;
-    notice.body.push(sub[0], sub[1], sub[2]);
-  });
-  // Send the remainder. Also if we never sent anything because there
-  // were no subs, send a packet anyway.
-  if (notice.body.length > 0 || subs.length == 0) {
-    notice.body.push('');
-    servacks.push(internalSendNotice(notice, certRoutine).servack);
+  try {
+    var uids = internal.subscriptions(subs, opcode);
+  } catch (err) {
+    process.nextTick(function() {
+      cb(err);
+    });
+    return;
   }
 
-  Q.nodeify(Q.all(servacks), cb);
+  Q.nodeify(Q.all(uids.map(function(uid) {
+    var key = uid.toString('base64');
+    servackTable[key] = Q.defer();
+    return servackTable[key].promise;
+  })), cb);
 }
 
 zephyr.subscribeTo = function(subs, cb) {

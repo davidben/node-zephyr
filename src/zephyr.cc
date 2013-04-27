@@ -83,15 +83,6 @@ bool CertRoutineFromString(const std::string& str, Z_AuthProc* proc) {
     *proc = ZAUTH;
     return true;
   }
-  if (str == "ZSUBAUTH") {
-#ifdef ZSUBAUTH
-    *proc = ZSUBAUTH;
-#else
-#warning Not compiling against libzephyr with key management support.
-    *proc = ZAUTH;
-#endif
-    return true;
-  }
   return false;
 }
 
@@ -415,6 +406,62 @@ Handle<Value> FormatNotice(const Arguments& args) {
       node::Buffer::New(buffer, len, FreeCallback, NULL)->handle_);
 }
 
+/*[ SUBSCRIPTIONS ]***********************************************************/
+
+Handle<Value> Subscriptions(const Arguments& args) {
+  HandleScope scope;
+
+  ABORT_UNLESS_INITIALIZED();
+
+  if (args.Length() != 2 || !args[0]->IsArray()) {
+    ThrowException(Exception::TypeError(String::New(
+        "Arguments; subs, opcode")));
+    return scope.Close(Undefined());
+  }
+
+  std::string opcode = ValueToString(args[1]);
+
+  // Don't bother normalizing anything. Leave that to JS.
+  Local<Array> array = Local<Array>::Cast(args[0]);
+  std::vector<std::string> strings; strings.reserve(array->Length() * 3);
+  std::vector<ZSubscription_t> subs; subs.reserve(array->Length());
+  for (uint32_t i = 0; i < array->Length(); i++) {
+    if (!array->Get(i)->IsArray()) {
+      ThrowException(Exception::TypeError(String::New("Expected array")));
+      return scope.Close(Undefined());
+    }
+    Local<Array> sub_array = Local<Array>::Cast(array->Get(i));
+    ZSubscription_t sub;
+
+    strings.push_back(ValueToString(sub_array->Get(0)));
+    sub.zsub_class = const_cast<char*>(strings.back().c_str());
+
+    strings.push_back(ValueToString(sub_array->Get(1)));
+    sub.zsub_classinst = const_cast<char*>(strings.back().c_str());
+
+    strings.push_back(ValueToString(sub_array->Get(2)));
+    sub.zsub_recipient = const_cast<char*>(strings.back().c_str());
+
+    subs.push_back(sub);
+  }
+
+  Code_t ret = ZSubscriptions(&subs[0], subs.size(), 0,
+                              const_cast<char*>(opcode.c_str()),
+                              SendFunction);
+  if (ret != ZERR_NONE) {
+    ThrowException(ComErrException(ret));
+    g_wait_on_uids.clear();
+    return scope.Close(Undefined());
+  }
+
+  Local<Array> uids = Array::New();
+  for (unsigned i = 0; i < g_wait_on_uids.size(); i++) {
+    uids->Set(i, ZUniqueIdToBuffer(g_wait_on_uids[i]));
+  }
+  g_wait_on_uids.clear();
+  return scope.Close(uids);
+}
+
 /*[ INIT ]********************************************************************/
 
 void Init(Handle<Object> exports, Handle<Value> module) {
@@ -436,6 +483,8 @@ void Init(Handle<Object> exports, Handle<Value> module) {
                FunctionTemplate::New(SendNotice)->GetFunction());
   exports->Set(g_symbol_formatNotice,
                FunctionTemplate::New(FormatNotice)->GetFunction());
+  exports->Set(g_symbol_subscriptions,
+               FunctionTemplate::New(Subscriptions)->GetFunction());
 }
 
 NODE_MODULE(zephyr, Init)
