@@ -307,7 +307,12 @@ NoticeFields ObjectToNoticeFields(Handle<Object> obj) {
       String::Utf8Value value(body_array->Get(i));
       if (i > 0)
         ret.message.push_back('\0');
-      ret.message.append(*value, value.length());
+      // Intentionally truncate each string at a NUL. Better to
+      // silently truncate a la all the other C strings rather than
+      // inject field separators.
+      char* p = static_cast<char*>(memchr(*value, '\0', value.length()));
+      size_t truncated = p ? (p - *value) : value.length();
+      ret.message.append(*value, truncated);
     }
   }
 
