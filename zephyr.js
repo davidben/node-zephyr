@@ -48,6 +48,8 @@ zephyr.openPort = internal.openPort;
 zephyr.getSender = internal.getSender;
 zephyr.getRealm = internal.getRealm;
 
+zephyr.downcase = internal.downcase;
+
 var hmackTable = { };
 var servackTable = { };
 

@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,8 @@ extern "C" {
 #include <com_err.h>
 #include <krb5/krb5.h>
 #include <zephyr/zephyr.h>
+
+#include "utf8proc.h"
 }
 
 using namespace v8;
@@ -462,6 +465,70 @@ Handle<Value> Subscriptions(const Arguments& args) {
   return scope.Close(uids);
 }
 
+/** DOWNCASE *********************************************/
+
+int IsValidUtf8(const char* s) {
+  ssize_t len;
+  int32_t uc;
+
+  while ((len = utf8proc_iterate((const unsigned char *)s, -1, &uc))) {
+    if (len <=0) return 0; /* Not valid UTF-8 encoding. */
+    /* Not valid unicode codepoint. */
+    if (!(utf8proc_codepoint_valid(uc))) return 0;
+    if (uc == 0) return 1; /* NULL, we're done. */
+    s += len;
+  }
+  return 0; /* We shouldn't get here. */
+}
+
+// Modeled after zdowncase in zephyr's server/zstring.c.
+Handle<Value> Downcase(const Arguments& args) {
+  HandleScope scope;
+
+  std::string arg = ValueToString(args[0]);
+
+  // We go from JS strings to UTF-8, but this can probably still trip
+  // up because JS strings can contain unmatched surrogate pairs.
+  if (IsValidUtf8(arg.c_str())) {
+    unsigned char *new_s_u; /* Avoid strict aliasing violation */
+
+    /* Use utf8proc if we're dealing with UTF-8.
+     * Rather than downcase, casefold and normalize to NFKC.
+     */
+    // C++ and JavaScript strings can contain NULs. utf8proc handles
+    // this, but we intentionally use NULLTERM and
+    // std::string::c_str. This way strings get silently truncated at
+    // NULs, as they currently do in sendNotice. The intent is that
+    // two class names with matching zephyr.downcase(className) will
+    // result in equivalent subscriptions. By virtue of using C
+    // strings, these bindings will implicitly truncate at NULs in
+    // other functions.
+    //
+    // Possibly we should be being more picky and failing hard on
+    // NULs or something.
+    ssize_t len = utf8proc_map((const unsigned char *)arg.c_str(), 0,
+                               (unsigned char **)&new_s_u,
+                               UTF8PROC_NULLTERM |
+                               UTF8PROC_STABLE | UTF8PROC_CASEFOLD |
+                               UTF8PROC_COMPAT | UTF8PROC_COMPOSE);
+    if (len < 0) {
+      ThrowException(Exception::Error(String::New(
+          utf8proc_errmsg(len))));
+      return scope.Close(Undefined());
+    }
+    arg.assign((char*)new_s_u, len);
+    free(new_s_u);
+  } else {
+    /* If not, fall back to old methods. */
+    for (unsigned i = 0; i < arg.size(); i++) {
+      if (isascii(arg[i]) && isupper(arg[i]))
+        arg[i] = tolower(arg[i]);
+    }
+  }
+
+  return scope.Close(String::New(arg.data(), arg.length()));
+}
+
 /*[ INIT ]********************************************************************/
 
 void Init(Handle<Object> exports, Handle<Value> module) {
@@ -485,6 +552,8 @@ void Init(Handle<Object> exports, Handle<Value> module) {
                FunctionTemplate::New(FormatNotice)->GetFunction());
   exports->Set(g_symbol_subscriptions,
                FunctionTemplate::New(Subscriptions)->GetFunction());
+  exports->Set(g_symbol_downcase,
+               FunctionTemplate::New(Downcase)->GetFunction());
 }
 
 NODE_MODULE(zephyr, Init)
