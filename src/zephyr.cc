@@ -192,8 +192,13 @@ void ZephyrToObject(ZNotice_t *notice, Handle<Object> target) {
               String::New(inet_ntoa(notice->z_sender_addr)));
 
   // Split up the body's components by NULs.
+  //
+  // TODO(davidben): Can I just implement this in JavaScript with
+  // String.prototype.split? Minor nuisance is that we then do a UTF-8
+  // to JS string conversion over the entire string. Which I'm... fair
+  // sure is fine?
   Local<Array> body = Array::New();
-  for (int offset = 0, i = 0; offset < notice->z_message_len; i++) {
+  for (int offset = 0, i = 0; offset <= notice->z_message_len; i++) {
     const char* nul = static_cast<const char*>(
         memchr(notice->z_message + offset, 0, notice->z_message_len - offset));
     int nul_offset = nul ? (nul - notice->z_message) : notice->z_message_len;
