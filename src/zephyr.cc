@@ -300,7 +300,10 @@ std::string GetStringProperty(Handle<Object> source,
 NoticeFields ObjectToNoticeFields(Handle<Object> obj) {
   NoticeFields ret;
 
-  ret.kind = ACKED;
+  // TODO(davidben): Let you change kind? It'd also need to be
+  // mirrored by punting HMACK/SERVACK stuff on the JS side. Possibly
+  // put that logic in C++ actually, so JS gets two lists of uids?
+  // Dunno.
   if (obj->Has(g_symbol_port))
     ret.port = ntohs(obj->Get(g_symbol_port)->ToUint32()->Value());
   ret.msg_class = GetStringProperty(obj, g_symbol_class, "MESSAGE");
