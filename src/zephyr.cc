@@ -1,3 +1,4 @@
+#include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -174,7 +175,7 @@ Handle<Value> GetRealm(const Arguments& args) {
 
 void ZephyrToObject(ZNotice_t *notice, Handle<Object> target) {
   target->Set(g_symbol_version, String::New(notice->z_version));
-  target->Set(g_symbol_port, Number::New(notice->z_port));
+  target->Set(g_symbol_port, Number::New(ntohs(notice->z_port)));
   target->Set(g_symbol_checkedAuth, Number::New(notice->z_checked_auth));
   target->Set(g_symbol_class, String::New(notice->z_class));
   target->Set(g_symbol_instance, String::New(notice->z_class_inst));
