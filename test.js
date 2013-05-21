@@ -35,6 +35,7 @@ zephyr.subscribeTo([ [ cls, inst, '*' ] ], function(err) {
 
   process.stdin.on('data', function(message) {
     zephyr.sendNotice({
+      port: 1,
       class: cls,
       instance: inst,
       body: [

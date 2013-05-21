@@ -94,6 +94,7 @@ bool CertRoutineFromString(const std::string& str, Z_AuthProc* proc) {
 // ownership purposes.
 struct NoticeFields {
   ZNotice_Kind_t kind;
+  unsigned short port;
   std::string msg_class;
   std::string instance;
   std::string default_format;
@@ -102,10 +103,13 @@ struct NoticeFields {
   std::string sender;
   std::string message;
 
+  NoticeFields() : kind(ACKED), port(0) { }
+
   // Resulting ZNotice_t only valid as long as the NoticeFields.
   void ToNotice(ZNotice_t* notice) {
     memset(notice, 0, sizeof(*notice));
     notice->z_kind = kind;
+    notice->z_port = port;
     notice->z_class = const_cast<char*>(msg_class.c_str());
     notice->z_class_inst = const_cast<char*>(instance.c_str());
     notice->z_default_format = const_cast<char*>(default_format.c_str());
@@ -297,6 +301,8 @@ NoticeFields ObjectToNoticeFields(Handle<Object> obj) {
   NoticeFields ret;
 
   ret.kind = ACKED;
+  if (obj->Has(g_symbol_port))
+    ret.port = ntohs(obj->Get(g_symbol_port)->ToUint32()->Value());
   ret.msg_class = GetStringProperty(obj, g_symbol_class, "MESSAGE");
   ret.instance = GetStringProperty(obj, g_symbol_instance, "PERSONAL");
   ret.default_format = GetStringProperty(obj, g_symbol_format,
