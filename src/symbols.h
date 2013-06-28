@@ -8,6 +8,8 @@ NODE_ZEPHYR_SYMBOL(getRealm)
 NODE_ZEPHYR_SYMBOL(sendNotice)
 NODE_ZEPHYR_SYMBOL(setNoticeCallback)
 NODE_ZEPHYR_SYMBOL(subscriptions)
+NODE_ZEPHYR_SYMBOL(dumpSession)
+NODE_ZEPHYR_SYMBOL(loadSession)
 
 // Keys on notice objects.
 NODE_ZEPHYR_SYMBOL(version)

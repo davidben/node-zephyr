@@ -90,6 +90,10 @@ bool CertRoutineFromString(const std::string& str, Z_AuthProc* proc) {
   return false;
 }
 
+void FreeCallback(char* data, void*) {
+  free(data);
+}
+
 // A struct containing data to populate a ZNotice_t. Mostly for
 // ownership purposes.
 struct NoticeFields {
@@ -168,6 +172,49 @@ Handle<Value> OpenPort(const Arguments& args) {
   InstallZephyrListener();
 
   return scope.Close(Undefined());
+}
+
+/*[ SESSIONS ]****************************************************************/
+
+Handle<Value> LoadSession(const Arguments& args) {
+  HandleScope scope;
+
+  ABORT_UNLESS_INITIALIZED();
+
+  if (args.Length() != 1 || !node::Buffer::HasInstance(args[0])) {
+    ThrowException(Exception::TypeError(
+        String::New("Parameter not a buffer")));
+    return scope.Close(Undefined());
+  }
+
+  RemoveZephyrListener();
+  v8::Local<v8::Object> obj = args[0]->ToObject();
+  Code_t ret = ZLoadSession(node::Buffer::Data(obj),
+                            node::Buffer::Length(obj));
+  if (ret != ZERR_NONE) {
+    ThrowException(ComErrException(ret));
+    return scope.Close(Undefined());
+  }
+  InstallZephyrListener();
+
+  return scope.Close(Undefined());
+}
+
+Handle<Value> DumpSession(const Arguments& args) {
+  HandleScope scope;
+
+  ABORT_UNLESS_INITIALIZED();
+
+  char *buffer;
+  int len;
+  Code_t ret = ZDumpSession(&buffer, &len);
+  if (ret != ZERR_NONE) {
+    ThrowException(ComErrException(ret));
+    return scope.Close(Undefined());
+  }
+
+  return scope.Close(
+      node::Buffer::New(buffer, len, FreeCallback, NULL)->handle_);
 }
 
 /*[ MISC ]*******************************************************************/
@@ -415,10 +462,6 @@ Handle<Value> SendNotice(const Arguments& args) {
 
 /*[ FORMAT ]******************************************************************/
 
-void FreeCallback(char* data, void*) {
-  free(data);
-}
-
 Handle<Value> FormatNotice(const Arguments& args) {
   HandleScope scope;
 
@@ -601,6 +644,10 @@ void Init(Handle<Object> exports, Handle<Value> module) {
                FunctionTemplate::New(Subscriptions)->GetFunction());
   exports->Set(g_symbol_downcase,
                FunctionTemplate::New(Downcase)->GetFunction());
+  exports->Set(g_symbol_dumpSession,
+               FunctionTemplate::New(DumpSession)->GetFunction());
+  exports->Set(g_symbol_loadSession,
+               FunctionTemplate::New(LoadSession)->GetFunction());
 }
 
 NODE_MODULE(zephyr, Init)

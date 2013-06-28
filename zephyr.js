@@ -45,6 +45,9 @@ var Z_MAXPKTLEN = 1024;
 zephyr.initialize = internal.initialize;
 zephyr.openPort = internal.openPort;
 
+zephyr.dumpSession = internal.dumpSession;
+zephyr.loadSession = internal.loadSession;
+
 // TODO: Make these properties with a getter?
 zephyr.getSender = internal.getSender;
 zephyr.getRealm = internal.getRealm;

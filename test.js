@@ -3,8 +3,51 @@ var zephyr = require('./zephyr');
 var cls = process.argv[2];
 var inst = process.argv[3];
 
+function subscribe() {
+  console.log('Subscribing to %s %s', cls, inst);
+  zephyr.subscribeTo([ [ cls, inst, '*' ] ], function(err) {
+    if (err) {
+      console.dir(err);
+      return;
+    }
+    console.log('Subscribed to %s %s', cls, inst);
+
+    process.stdin.on('data', function(message) {
+      zephyr.sendNotice({
+        port: 1,
+        class: cls,
+        instance: inst,
+        body: [
+	  'badass rockstar zephyr',
+	  message
+        ]
+      }, zephyr.ZAUTH, function(err) {
+        if (err) {
+	  console.dir(err);
+	  return;
+        }
+        console.log('got HMACK');
+      }).on('servack', function(err, msg) {
+        if (err) {
+	  console.dir('got SERVNAK', err);
+	  return;
+        }
+        console.log('got SERVACK', msg);
+      });
+    });
+    process.stdin.setEncoding('utf8');
+    process.stdin.resume();
+  });
+}
+
 zephyr.initialize();
-zephyr.openPort();
+if (process.argv[4]) {
+  zephyr.loadSession(new Buffer(process.argv[4], 'base64'));
+  setTimeout(subscribe, 5000);
+} else {
+  zephyr.openPort();
+  subscribe();
+}
 
 zephyr.on("notice", function(msg) {
   if (msg.kind == zephyr.HMACK) {
@@ -27,36 +70,6 @@ zephyr.on("notice", function(msg) {
   }
 });
 
-zephyr.subscribeTo([ [ cls, inst, '*' ] ], function(err) {
-  if (err) {
-    console.dir(err);
-    return;
-  }
-  console.log('Subscribed to %s %s', cls, inst);
-
-  process.stdin.on('data', function(message) {
-    zephyr.sendNotice({
-      port: 1,
-      class: cls,
-      instance: inst,
-      body: [
-	'badass rockstar zephyr',
-	message
-      ]
-    }, zephyr.ZAUTH, function(err) {
-      if (err) {
-	console.dir(err);
-	return;
-      }
-      console.log('got HMACK');
-    }).on('servack', function(err, msg) {
-      if (err) {
-	console.dir('got SERVNAK', err);
-	return;
-      }
-      console.log('got SERVACK', msg);
-    });
-  });
-  process.stdin.setEncoding('utf8');
-  process.stdin.resume();
-});
+setInterval(function() {
+  console.log('Session state', zephyr.dumpSession().toString('base64'));
+}, 2000);
