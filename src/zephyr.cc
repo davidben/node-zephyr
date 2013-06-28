@@ -27,7 +27,7 @@ namespace {
 Persistent<Function> g_on_msg;
 uv_loop_t *g_loop;
 uv_poll_t g_zephyr_poll;
-bool g_initialized;
+bool g_initialized, g_listener_active;
 
 #define NODE_ZEPHYR_SYMBOL(sym) \
   Persistent<String> g_symbol_ ## sym ;
@@ -133,8 +133,9 @@ struct NoticeFields {
 /*[ OPENPORT ]****************************************************************/
 
 void InstallZephyrListener();
+void RemoveZephyrListener();
 
-Handle<Value> OpenPort(const Arguments& args) {
+Handle<Value> Initialize(const Arguments& args) {
   HandleScope scope;
 
   if (g_initialized) {
@@ -149,14 +150,22 @@ Handle<Value> OpenPort(const Arguments& args) {
     return scope.Close(Undefined());
   }
 
-  ret = ZOpenPort(NULL);
+  g_initialized = true;
+  return scope.Close(Undefined());
+}
+
+Handle<Value> OpenPort(const Arguments& args) {
+  HandleScope scope;
+
+  ABORT_UNLESS_INITIALIZED();
+
+  RemoveZephyrListener();
+  Code_t ret = ZOpenPort(NULL);
   if (ret != ZERR_NONE) {
     ThrowException(ComErrException(ret));
     return scope.Close(Undefined());
   }
-
   InstallZephyrListener();
-  g_initialized = true;
 
   return scope.Close(Undefined());
 }
@@ -266,6 +275,10 @@ Handle<Value> SetNoticeCallback(const Arguments& args) {
 }
 
 void InstallZephyrListener() {
+  if (g_listener_active) {
+    fprintf(stderr, "ERROR: Listener active!\n");
+  }
+
   int fd = ZGetFD();
   if (fd < 0) {
     fprintf(stderr, "No zephyr FD\n");
@@ -284,6 +297,18 @@ void InstallZephyrListener() {
     fprintf(stderr, "uv_poll_start: %d\n", ret);
     return;
   }
+}
+
+void RemoveZephyrListener() {
+  if (!g_listener_active)
+    return;
+
+  int ret = uv_poll_stop(&g_zephyr_poll);
+  if (ret != 0) {
+    fprintf(stderr, "uv_poll_stop: %d\n", ret);
+    return;
+  }
+  g_listener_active = false;
 }
 
 /*[ SEND ]********************************************************************/
@@ -558,6 +583,8 @@ void Init(Handle<Object> exports, Handle<Value> module) {
 
   // TODO: Explicit close port and cancel subs commands. We don't
   // really clean up properly right now.
+  exports->Set(g_symbol_initialize,
+               FunctionTemplate::New(Initialize)->GetFunction());
   exports->Set(g_symbol_openPort,
                FunctionTemplate::New(OpenPort)->GetFunction());
   exports->Set(g_symbol_getSender,

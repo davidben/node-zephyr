@@ -42,6 +42,7 @@ zephyr.CLIENT_FLUSHSUBS = 'FLUSHSUBS';
 var Z_FRAGFUDGE = 13;
 var Z_MAXPKTLEN = 1024;
 
+zephyr.initialize = internal.initialize;
 zephyr.openPort = internal.openPort;
 
 // TODO: Make these properties with a getter?

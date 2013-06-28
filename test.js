@@ -3,6 +3,7 @@ var zephyr = require('./zephyr');
 var cls = process.argv[2];
 var inst = process.argv[3];
 
+zephyr.initialize();
 zephyr.openPort();
 
 zephyr.on("notice", function(msg) {

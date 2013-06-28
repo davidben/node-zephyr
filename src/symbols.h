@@ -1,4 +1,5 @@
 // Exported methods.
+NODE_ZEPHYR_SYMBOL(initialize)
 NODE_ZEPHYR_SYMBOL(openPort)
 NODE_ZEPHYR_SYMBOL(downcase)
 NODE_ZEPHYR_SYMBOL(formatNotice)
