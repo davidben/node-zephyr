@@ -406,7 +406,8 @@ NoticeFields ObjectToNoticeFields(Handle<Object> obj) {
   return ret;
 }
 
-std::vector<ZUnique_Id_t> g_wait_on_uids;
+std::vector<ZUnique_Id_t> g_hmack_uids;
+std::vector<ZUnique_Id_t> g_servack_uids;
 
 Code_t SendFunction(ZNotice_t* notice, char* packet, int len, int waitforack) {
   // Send without blocking.
@@ -415,8 +416,14 @@ Code_t SendFunction(ZNotice_t* notice, char* packet, int len, int waitforack) {
   // Save the ZUnique_Id_t for waiting on. Arguably we do this better
   // than the real libzephyr; ZSendPacket doesn't get a notice
   // argument and parses the notice back out again.
-  if (ret == ZERR_NONE && waitforack)
-    g_wait_on_uids.push_back(notice->z_uid);
+  if (ret == ZERR_NONE && waitforack) {
+    g_hmack_uids.push_back(notice->z_uid);
+    // libzephyr drops all SERVACKs on the floor if they're
+    // non-initial.
+    // TODO(davidben): Add a flag to libzephyr to turn off this nonsense.
+    if (ZCompareUID(&notice->z_uid, &notice->z_multiuid))
+      g_servack_uids.push_back(notice->z_uid);
+  }
 
   return ret;
 }
@@ -448,16 +455,25 @@ Handle<Value> SendNotice(const Arguments& args) {
 
   if (ret != ZERR_NONE) {
     ThrowException(ComErrException(ret));
-    g_wait_on_uids.clear();
+    g_hmack_uids.clear();
+    g_servack_uids.clear();
     return scope.Close(Undefined());
   }
 
-  Local<Array> uids = Array::New();
-  for (unsigned i = 0; i < g_wait_on_uids.size(); i++) {
-    uids->Set(i, ZUniqueIdToBuffer(g_wait_on_uids[i]));
+  Local<Array> result = Array::New();
+  Local<Array> hmacks = Array::New();
+  Local<Array> servacks = Array::New();
+  for (unsigned i = 0; i < g_hmack_uids.size(); i++) {
+    hmacks->Set(i, ZUniqueIdToBuffer(g_hmack_uids[i]));
   }
-  g_wait_on_uids.clear();
-  return scope.Close(uids);
+  for (unsigned i = 0; i < g_servack_uids.size(); i++) {
+    servacks->Set(i, ZUniqueIdToBuffer(g_servack_uids[i]));
+  }
+  result->Set(0, hmacks);
+  result->Set(1, servacks);
+  g_hmack_uids.clear();
+  g_servack_uids.clear();
+  return scope.Close(result);
 }
 
 /*[ FORMAT ]******************************************************************/
@@ -541,16 +557,25 @@ Handle<Value> Subscriptions(const Arguments& args) {
                               SendFunction);
   if (ret != ZERR_NONE) {
     ThrowException(ComErrException(ret));
-    g_wait_on_uids.clear();
+    g_hmack_uids.clear();
+    g_servack_uids.clear();
     return scope.Close(Undefined());
   }
 
-  Local<Array> uids = Array::New();
-  for (unsigned i = 0; i < g_wait_on_uids.size(); i++) {
-    uids->Set(i, ZUniqueIdToBuffer(g_wait_on_uids[i]));
+  Local<Array> result = Array::New();
+  Local<Array> hmacks = Array::New();
+  Local<Array> servacks = Array::New();
+  for (unsigned i = 0; i < g_hmack_uids.size(); i++) {
+    hmacks->Set(i, ZUniqueIdToBuffer(g_hmack_uids[i]));
   }
-  g_wait_on_uids.clear();
-  return scope.Close(uids);
+  for (unsigned i = 0; i < g_servack_uids.size(); i++) {
+    servacks->Set(i, ZUniqueIdToBuffer(g_servack_uids[i]));
+  }
+  result->Set(0, hmacks);
+  result->Set(1, servacks);
+  g_hmack_uids.clear();
+  g_servack_uids.clear();
+  return scope.Close(result);
 }
 
 /** DOWNCASE *********************************************/

@@ -78,24 +78,30 @@ function internalSendNotice(msg, certRoutine) {
     };
   }
 
-  // Set up a bunch of deferreds for ACKs.
-  var keys = uids.map(function(uid) { return uid.toString('base64'); });
+  return waitOnUids(uids);
+}
+
+function waitOnUids(uids) {
+  // TODO(davidben): Have all of these time out appropriately, and
+  // whatnot. Also if an HMACK times out, there's no hope for the
+  // SERVACK, so punt it too.
 
   // HMACK
   // XXX: libzephyr gets confused with fragmentation code and HMACKs
   // and doesn't expect ZSendPacket to not block. This requires a fix
   // in libzephyr.
-  var hmack = Q.all(keys.map(function(key) {
+  var hmack = Q.all(uids[0].map(function(uid) {
+    var key = uid.toString('base64');
     hmackTable[key] = Q.defer();
     return hmackTable[key].promise;
   }));
 
   // SERVACK
-  // libzephyr also drops non-initial SERVACKs on the floor. This
-  // would be worth tweaking but, for now, only report on the initial
-  // one.
-  servackTable[keys[0]] = Q.defer();
-  var servack = Q.all([servackTable[keys[0]].promise]);
+  var servack = Q.all(uids[1].map(function(uid) {
+    var key = uid.toString('base64');
+    servackTable[key] = Q.defer();
+    return servackTable[key].promise;
+  }));
 
   return {
     hmack: hmack,
@@ -131,11 +137,7 @@ function zephyrCtl(opcode, subs, cb) {
     return;
   }
 
-  Q.nodeify(Q.all(uids.map(function(uid) {
-    var key = uid.toString('base64');
-    servackTable[key] = Q.defer();
-    return servackTable[key].promise;
-  })), cb);
+  Q.nodeify(waitOnUids(uids).servack, cb);
 }
 
 zephyr.subscribeTo = function(subs, cb) {
