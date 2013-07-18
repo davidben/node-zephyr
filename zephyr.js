@@ -57,9 +57,10 @@ zephyr.downcase = internal.downcase;
 var hmackTable = { };
 var servackTable = { };
 
-function OutgoingNotice(hmack, servack) {
+function OutgoingNotice(uid, hmack, servack) {
   events.EventEmitter.call(this);
 
+  this.uid = uid;
   Q.nodeify(hmack, this.emit.bind(this, 'hmack'));
   Q.nodeify(servack, this.emit.bind(this, 'servack'));
 }
@@ -104,6 +105,10 @@ function waitOnUids(uids) {
   }));
 
   return {
+    // This assumes that the send_function is called by ZSrvSendPacket
+    // in the right order. A pretty safe assumption. If it ever
+    // breaks, we can return a third thing easily enough.
+    uid: uids[0][0],
     hmack: hmack,
     servack: servack,
   };
@@ -111,7 +116,7 @@ function waitOnUids(uids) {
 
 zephyr.sendNotice = function(msg, certRoutine, onHmack) {
   var acks = internalSendNotice(msg, certRoutine);
-  var ev = new OutgoingNotice(acks.hmack, acks.servack);
+  var ev = new OutgoingNotice(acks.uid, acks.hmack, acks.servack);
   if (onHmack)
     ev.once('hmack', onHmack);
   return ev;

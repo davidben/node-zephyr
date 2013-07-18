@@ -13,7 +13,7 @@ function subscribe() {
     console.log('Subscribed to %s %s', cls, inst);
 
     process.stdin.on('data', function(message) {
-      zephyr.sendNotice({
+      var notice = zephyr.sendNotice({
         port: 1,
         class: cls,
         instance: inst,
@@ -34,6 +34,7 @@ function subscribe() {
         }
         console.log('got SERVACK', msg);
       });
+      console.log('uid', notice.uid);
     });
     process.stdin.setEncoding('utf8');
     process.stdin.resume();
