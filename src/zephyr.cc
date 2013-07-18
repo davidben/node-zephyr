@@ -99,6 +99,7 @@ void FreeCallback(char* data, void*) {
 struct NoticeFields {
   ZNotice_Kind_t kind;
   unsigned short port;
+  unsigned short charset;
   std::string msg_class;
   std::string instance;
   std::string default_format;
@@ -107,13 +108,14 @@ struct NoticeFields {
   std::string sender;
   std::string message;
 
-  NoticeFields() : kind(ACKED), port(0) { }
+  NoticeFields() : kind(ACKED), port(0), charset(ZCHARSET_UTF_8) { }
 
   // Resulting ZNotice_t only valid as long as the NoticeFields.
   void ToNotice(ZNotice_t* notice) {
     memset(notice, 0, sizeof(*notice));
     notice->z_kind = kind;
     notice->z_port = port;
+    notice->z_charset = charset;
     notice->z_class = const_cast<char*>(msg_class.c_str());
     notice->z_class_inst = const_cast<char*>(instance.c_str());
     notice->z_default_format = const_cast<char*>(default_format.c_str());
@@ -258,6 +260,9 @@ void ZephyrToObject(ZNotice_t *notice, Handle<Object> target) {
   // String.prototype.split? Minor nuisance is that we then do a UTF-8
   // to JS string conversion over the entire string. Which I'm... fair
   // sure is fine?
+  //
+  // TOOD(davidben): Pay attention to z_charset here? BarnOwl doesn't,
+  // and we'd have to find a ISO-8859-1 decoder.
   Local<Array> body = Array::New();
   for (int offset = 0, i = 0; offset <= notice->z_message_len; i++) {
     const char* nul = static_cast<const char*>(
