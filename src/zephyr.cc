@@ -72,10 +72,8 @@ std::string ValueToString(const Handle<Value> str) {
   return std::string(*temp, temp.length());
 }
 
-Local<Object> ZUniqueIdToBuffer(const ZUnique_Id_t& uid) {
-  return Local<Object>::New(
-      node::Buffer::New(reinterpret_cast<const char*>(&uid),
-                        sizeof(uid))->handle_);
+Local<Value> ZUniqueIdToString(const ZUnique_Id_t& uid) {
+  return node::Encode(&uid, sizeof(uid), node::BASE64);
 }
 
 bool CertRoutineFromString(const std::string& str, Z_AuthProc* proc) {
@@ -249,7 +247,7 @@ void ZephyrToObject(ZNotice_t *notice, Handle<Object> target) {
                                        notice->z_time.tv_usec / 1000.0));
   target->Set(g_symbol_auth, Number::New(notice->z_auth));
 
-  target->Set(g_symbol_uid, ZUniqueIdToBuffer(notice->z_uid));
+  target->Set(g_symbol_uid, ZUniqueIdToString(notice->z_uid));
 
   target->Set(g_symbol_senderAddr,
               String::New(inet_ntoa(notice->z_sender_addr)));
@@ -469,10 +467,10 @@ Handle<Value> SendNotice(const Arguments& args) {
   Local<Array> hmacks = Array::New();
   Local<Array> servacks = Array::New();
   for (unsigned i = 0; i < g_hmack_uids.size(); i++) {
-    hmacks->Set(i, ZUniqueIdToBuffer(g_hmack_uids[i]));
+    hmacks->Set(i, ZUniqueIdToString(g_hmack_uids[i]));
   }
   for (unsigned i = 0; i < g_servack_uids.size(); i++) {
-    servacks->Set(i, ZUniqueIdToBuffer(g_servack_uids[i]));
+    servacks->Set(i, ZUniqueIdToString(g_servack_uids[i]));
   }
   result->Set(0, hmacks);
   result->Set(1, servacks);
@@ -571,10 +569,10 @@ Handle<Value> Subscriptions(const Arguments& args) {
   Local<Array> hmacks = Array::New();
   Local<Array> servacks = Array::New();
   for (unsigned i = 0; i < g_hmack_uids.size(); i++) {
-    hmacks->Set(i, ZUniqueIdToBuffer(g_hmack_uids[i]));
+    hmacks->Set(i, ZUniqueIdToString(g_hmack_uids[i]));
   }
   for (unsigned i = 0; i < g_servack_uids.size(); i++) {
-    servacks->Set(i, ZUniqueIdToBuffer(g_servack_uids[i]));
+    servacks->Set(i, ZUniqueIdToString(g_servack_uids[i]));
   }
   result->Set(0, hmacks);
   result->Set(1, servacks);

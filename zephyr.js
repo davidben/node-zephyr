@@ -92,16 +92,14 @@ function waitOnUids(uids) {
   // and doesn't expect ZSendPacket to not block. This requires a fix
   // in libzephyr.
   var hmack = Q.all(uids[0].map(function(uid) {
-    var key = uid.toString('base64');
-    hmackTable[key] = Q.defer();
-    return hmackTable[key].promise;
+    hmackTable[uid] = Q.defer();
+    return hmackTable[uid].promise;
   }));
 
   // SERVACK
   var servack = Q.all(uids[1].map(function(uid) {
-    var key = uid.toString('base64');
-    servackTable[key] = Q.defer();
-    return servackTable[key].promise;
+    servackTable[uid] = Q.defer();
+    return servackTable[uid].promise;
   }));
 
   return {
@@ -169,22 +167,22 @@ internal.setNoticeCallback(function(err, notice) {
     return;
   }
 
-  var key;
+  var uid;
   if (notice.kind === zephyr.HMACK) {
-    key = notice.uid.toString('base64');
-    if (hmackTable[key])
-      hmackTable[key].resolve(null);
-    delete hmackTable[key];
+    uid = notice.uid;
+    if (hmackTable[uid])
+      hmackTable[uid].resolve(null);
+    delete hmackTable[uid];
   } else if (notice.kind === zephyr.SERVACK) {
-    key = notice.uid.toString('base64');
-    if (servackTable[key])
-      servackTable[key].resolve(notice.body[0]);
-    delete servackTable[key];
+    uid = notice.uid;
+    if (servackTable[uid])
+      servackTable[uid].resolve(notice.body[0]);
+    delete servackTable[uid];
   } else if (notice.kind === zephyr.SERVNAK) {
-    key = notice.uid.toString('base64');
-    if (servackTable[key])
-      servackTable[key].reject(new Error(notice.body[0]));
-    delete servackTable[key];
+    uid = notice.uid;
+    if (servackTable[uid])
+      servackTable[uid].reject(new Error(notice.body[0]));
+    delete servackTable[uid];
   }
 
   zephyr.emit("notice", notice);
