@@ -90,7 +90,6 @@ function sendPackets(packets) {
     // We create our own socket to send on and listen for ACKs on
     // that. Otherwise we have to deal with libzephyr blocking on
     // everything, including a sendto.
-    console.log('Creating socket');
     sock = dgram.createSocket('udp4');
     sock.on('message', function(msg, rinfo) {
       var notice = internal.parseNotice(msg);
