@@ -1,3 +1,4 @@
+var dgram = require('dgram');
 var events = require('events');
 var util = require('util');
 
@@ -51,11 +52,9 @@ zephyr.loadSession = internal.loadSession;
 // TODO: Make these properties with a getter?
 zephyr.getSender = internal.getSender;
 zephyr.getRealm = internal.getRealm;
+zephyr.getDestAddr = internal.getDestAddr;
 
 zephyr.downcase = internal.downcase;
-
-var hmackTable = { };
-var servackTable = { };
 
 function OutgoingNotice(uid, hmack, servack) {
   events.EventEmitter.call(this);
@@ -68,7 +67,7 @@ OutgoingNotice.prototype = Object.create(events.EventEmitter.prototype);
 
 function internalSendNotice(msg, certRoutine) {
   try {
-    var uids = internal.sendNotice(msg, certRoutine);
+    var packets = internal.sendNotice(msg, certRoutine);
   } catch (err) {
     // FIXME: Maybe this should just be synchronous? Reporting the
     // error twice is silly, but if you fail this early, you fail
@@ -79,35 +78,88 @@ function internalSendNotice(msg, certRoutine) {
     };
   }
 
-  return waitOnUids(uids);
+  return sendPackets(packets);
 }
 
-function waitOnUids(uids) {
+var sock;
+var hmackTable = { };
+var servackTable = { };
+function sendPackets(packets) {
+  // Lazily initialize the sending packet. Meh.
+  if (!sock) {
+    // We create our own socket to send on and listen for ACKs on
+    // that. Otherwise we have to deal with libzephyr blocking on
+    // everything, including a sendto.
+    console.log('Creating socket');
+    sock = dgram.createSocket('udp4');
+    sock.on('message', function(msg, rinfo) {
+      var notice = internal.parseNotice(msg);
+
+      var uid;
+      if (notice.kind === zephyr.HMACK) {
+        uid = notice.uid;
+        if (hmackTable[uid])
+          hmackTable[uid].resolve(null);
+        delete hmackTable[uid];
+      } else if (notice.kind === zephyr.SERVACK) {
+        uid = notice.uid;
+        if (servackTable[uid])
+          servackTable[uid].resolve(notice.body[0]);
+        delete servackTable[uid];
+      } else if (notice.kind === zephyr.SERVNAK) {
+        uid = notice.uid;
+        if (servackTable[uid])
+          servackTable[uid].reject(new Error(notice.body[0]));
+        delete servackTable[uid];
+      }
+    });
+  }
+
+  // To avoid the kernel dropping packets, send the packets one at a
+  // time, waiting for HMACKs between each.
+  var sendAndHmack = packets.reduce(function(soFar, pkt) {
+    var kind = pkt.kind;
+    var uid = pkt.uid;
+    var buffer = pkt.buffer;
+    return soFar.then(function() {
+      var dest = zephyr.getDestAddr();
+      var ret = Q.ninvoke(sock, 'send',
+                          buffer, 0, buffer.length,
+                          dest.port, dest.host);
+      // Make sure the buffer is not held by the next closure. Silly
+      // stuff with how V8 implements closures.
+      buffer = null;
+      return ret;
+    }).then(function() {
+      if (kind === zephyr.UNACKED || kind === zephyr.UNSAFE) {
+        hmackTable[uid] = Q.defer();
+        return hmackTable[uid].promise;
+      }
+      return Q();
+    });
+  }, Q());
+
   // TODO(davidben): Have all of these time out appropriately, and
   // whatnot. Also if an HMACK times out, there's no hope for the
   // SERVACK, so punt it too.
 
-  // HMACK
-  // XXX: libzephyr gets confused with fragmentation code and HMACKs
-  // and doesn't expect ZSendPacket to not block. This requires a fix
-  // in libzephyr.
-  var hmack = Q.all(uids[0].map(function(uid) {
-    hmackTable[uid] = Q.defer();
-    return hmackTable[uid].promise;
-  }));
-
   // SERVACK
-  var servack = Q.all(uids[1].map(function(uid) {
-    servackTable[uid] = Q.defer();
-    return servackTable[uid].promise;
-  }));
+  var servack = Q.all(packets.filter(function(pkt) {
+    return pkt.kind == zephyr.ACKED;
+  }).map(function(pkt) {
+    servackTable[pkt.uid] = Q.defer();
+    return servackTable[pkt.uid].promise;
+  })).then(function(ret) {
+    // Just return the first fragment's result I guess...
+    return ret[0];
+  });
 
   return {
     // This assumes that the send_function is called by ZSrvSendPacket
     // in the right order. A pretty safe assumption. If it ever
     // breaks, we can return a third thing easily enough.
-    uid: uids[0][0],
-    hmack: hmack,
+    uid: packets[0].uid,
+    hmack: sendAndHmack,
     servack: servack,
   };
 };
@@ -132,7 +184,7 @@ function zephyrCtl(opcode, subs, cb) {
   });
 
   try {
-    var uids = internal.subscriptions(subs, opcode);
+    var packets = internal.subscriptions(subs, opcode);
   } catch (err) {
     process.nextTick(function() {
       cb(err);
@@ -140,7 +192,7 @@ function zephyrCtl(opcode, subs, cb) {
     return;
   }
 
-  Q.nodeify(waitOnUids(uids).servack, cb);
+  Q.nodeify(sendPackets(packets).servack, cb);
 }
 
 zephyr.subscribeTo = function(subs, cb) {
@@ -160,31 +212,13 @@ zephyr.cancelSubscriptions = function(cb) {
 };
 
 zephyr.formatNotice = internal.formatNotice;
+zephyr.parseNotice = internal.parseNotice;
 
 internal.setNoticeCallback(function(err, notice) {
   if (err) {
     zephyr.emit("error", err);
     return;
   }
-
-  var uid;
-  if (notice.kind === zephyr.HMACK) {
-    uid = notice.uid;
-    if (hmackTable[uid])
-      hmackTable[uid].resolve(null);
-    delete hmackTable[uid];
-  } else if (notice.kind === zephyr.SERVACK) {
-    uid = notice.uid;
-    if (servackTable[uid])
-      servackTable[uid].resolve(notice.body[0]);
-    delete servackTable[uid];
-  } else if (notice.kind === zephyr.SERVNAK) {
-    uid = notice.uid;
-    if (servackTable[uid])
-      servackTable[uid].reject(new Error(notice.body[0]));
-    delete servackTable[uid];
-  }
-
   zephyr.emit("notice", notice);
 });
 

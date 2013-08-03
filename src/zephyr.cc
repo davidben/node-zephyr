@@ -231,21 +231,37 @@ Handle<Value> GetRealm(const Arguments& args) {
   return scope.Close(String::New(ZGetRealm()));
 }
 
+Handle<Value> GetDestAddr(const Arguments& args) {
+  HandleScope scope;
+  ABORT_UNLESS_INITIALIZED();
+
+  sockaddr_in addr = ZGetDestAddr();
+
+  Local<Object> ret = Object::New();
+  char ip[INET_ADDRSTRLEN];
+  uv_inet_ntop(AF_INET, &addr.sin_addr, ip, sizeof ip);
+  ret->Set(g_symbol_host, String::New(ip));
+  ret->Set(g_symbol_port, Integer::New(ntohs(addr.sin_port)));
+  return scope.Close(ret);
+}
+
 /*[ CHECK ]*******************************************************************/
 
-void ZephyrToObject(ZNotice_t *notice, Handle<Object> target) {
+Local<Object> ZephyrToObject(ZNotice_t *notice) {
+  Local<Object> target = Object::New();
+
   target->Set(g_symbol_version, String::New(notice->z_version));
-  target->Set(g_symbol_port, Number::New(ntohs(notice->z_port)));
-  target->Set(g_symbol_checkedAuth, Number::New(notice->z_checked_auth));
+  target->Set(g_symbol_port, Integer::New(ntohs(notice->z_port)));
+  target->Set(g_symbol_checkedAuth, Integer::New(notice->z_checked_auth));
   target->Set(g_symbol_class, String::New(notice->z_class));
   target->Set(g_symbol_instance, String::New(notice->z_class_inst));
   target->Set(g_symbol_opcode, String::New(notice->z_opcode));
   target->Set(g_symbol_sender, String::New(notice->z_sender));
   target->Set(g_symbol_recipient, String::New(notice->z_recipient));
-  target->Set(g_symbol_kind, Number::New(notice->z_kind));
+  target->Set(g_symbol_kind, Integer::New(notice->z_kind));
   target->Set(g_symbol_time, Date::New(notice->z_time.tv_sec * 1000.0 +
                                        notice->z_time.tv_usec / 1000.0));
-  target->Set(g_symbol_auth, Number::New(notice->z_auth));
+  target->Set(g_symbol_auth, Integer::New(notice->z_auth));
 
   target->Set(g_symbol_uid, ZUniqueIdToString(notice->z_uid));
 
@@ -277,6 +293,8 @@ void ZephyrToObject(ZNotice_t *notice, Handle<Object> target) {
     other_fields->Set(i, String::New(notice->z_other_fields[i]));
   }
   target->Set(g_symbol_otherFields, other_fields);
+
+  return target;
 }
 
 void OnZephyrFDReady(uv_poll_t* handle, int status, int events) {
@@ -299,12 +317,10 @@ void OnZephyrFDReady(uv_poll_t* handle, int status, int events) {
       return;
     }
 
-    Handle<Object> object = Object::New();
     Local<Value> argv[2] = {
       Local<Value>::New(Null()),
-      Local<Object>::New(object)
+      ZephyrToObject(&notice)
     };
-    ZephyrToObject(&notice, object);
     callback->Call(Context::GetCurrent()->Global(), 2, argv);
     ZFreeNotice(&notice);
   }
@@ -409,26 +425,37 @@ NoticeFields ObjectToNoticeFields(Handle<Object> obj) {
   return ret;
 }
 
-std::vector<ZUnique_Id_t> g_hmack_uids;
-std::vector<ZUnique_Id_t> g_servack_uids;
+struct Packet {
+  ZNotice_Kind_t kind;
+  ZUnique_Id_t uid;
+  std::vector<char> buffer;
+};
+
+std::vector<Packet> g_packets;
 
 Code_t SendFunction(ZNotice_t* notice, char* packet, int len, int waitforack) {
-  // Send without blocking.
-  Code_t ret = ZSendPacket(packet, len, 0);
+  // Hold onto the packet for later. We'll send it in node.
+  g_packets.push_back(Packet());
+  g_packets.back().kind = notice->z_kind;
+  g_packets.back().uid = notice->z_uid;
+  g_packets.back().buffer.assign(packet, packet + len);
+  return ZERR_NONE;
+}
 
-  // Save the ZUnique_Id_t for waiting on. Arguably we do this better
-  // than the real libzephyr; ZSendPacket doesn't get a notice
-  // argument and parses the notice back out again.
-  if (ret == ZERR_NONE && waitforack) {
-    g_hmack_uids.push_back(notice->z_uid);
-    // libzephyr drops all SERVACKs on the floor if they're
-    // non-initial.
-    // TODO(davidben): Add a flag to libzephyr to turn off this nonsense.
-    if (ZCompareUID(&notice->z_uid, &notice->z_multiuid))
-      g_servack_uids.push_back(notice->z_uid);
+Local<Value> ReturnSavedPackets() {
+  Local<Array> result = Array::New();
+  for (unsigned i = 0; i < g_packets.size(); i++) {
+    Local<Object> packet = Object::New();
+    packet->Set(g_symbol_kind, Integer::New(g_packets[i].kind));
+    packet->Set(g_symbol_uid, ZUniqueIdToString(g_packets[i].uid));
+    packet->Set(g_symbol_buffer,
+                node::Buffer::New(&g_packets[i].buffer[0],
+                                  g_packets[i].buffer.size())->handle_);
+
+    result->Set(i, packet);
   }
-
-  return ret;
+  g_packets.clear();
+  return result;
 }
 
 Handle<Value> SendNotice(const Arguments& args) {
@@ -458,25 +485,10 @@ Handle<Value> SendNotice(const Arguments& args) {
 
   if (ret != ZERR_NONE) {
     ThrowException(ComErrException(ret));
-    g_hmack_uids.clear();
-    g_servack_uids.clear();
+    g_packets.clear();
     return scope.Close(Undefined());
   }
-
-  Local<Array> result = Array::New();
-  Local<Array> hmacks = Array::New();
-  Local<Array> servacks = Array::New();
-  for (unsigned i = 0; i < g_hmack_uids.size(); i++) {
-    hmacks->Set(i, ZUniqueIdToString(g_hmack_uids[i]));
-  }
-  for (unsigned i = 0; i < g_servack_uids.size(); i++) {
-    servacks->Set(i, ZUniqueIdToString(g_servack_uids[i]));
-  }
-  result->Set(0, hmacks);
-  result->Set(1, servacks);
-  g_hmack_uids.clear();
-  g_servack_uids.clear();
-  return scope.Close(result);
+  return scope.Close(ReturnSavedPackets());
 }
 
 /*[ FORMAT ]******************************************************************/
@@ -514,6 +526,35 @@ Handle<Value> FormatNotice(const Arguments& args) {
   }
   return scope.Close(
       node::Buffer::New(buffer, len, FreeCallback, NULL)->handle_);
+}
+
+
+/*[ PARSE ]******************************************************************/
+
+Handle<Value> ParseNotice(const Arguments& args) {
+  HandleScope scope;
+
+  ABORT_UNLESS_INITIALIZED();
+
+  if (args.Length() != 1 || !node::Buffer::HasInstance(args[0])) {
+    ThrowException(Exception::TypeError(
+        String::New("Parameter not a buffer")));
+    return scope.Close(Undefined());
+  }
+
+  Local<Object> buf = args[0]->ToObject();
+
+  ZNotice_t notice;
+  Code_t ret = ZParseNotice(node::Buffer::Data(buf),
+                            node::Buffer::Length(buf),
+                            &notice);
+  if (ret != ZERR_NONE) {
+    ThrowException(ComErrException(ret));
+    return scope.Close(Undefined());
+  }
+  // No need to free anything. Data is still owned by the
+  // buffer. ZParseNotice just references it.
+  return scope.Close(ZephyrToObject(&notice));
 }
 
 /*[ SUBSCRIPTIONS ]***********************************************************/
@@ -560,25 +601,10 @@ Handle<Value> Subscriptions(const Arguments& args) {
                               SendFunction);
   if (ret != ZERR_NONE) {
     ThrowException(ComErrException(ret));
-    g_hmack_uids.clear();
-    g_servack_uids.clear();
+    g_packets.clear();
     return scope.Close(Undefined());
   }
-
-  Local<Array> result = Array::New();
-  Local<Array> hmacks = Array::New();
-  Local<Array> servacks = Array::New();
-  for (unsigned i = 0; i < g_hmack_uids.size(); i++) {
-    hmacks->Set(i, ZUniqueIdToString(g_hmack_uids[i]));
-  }
-  for (unsigned i = 0; i < g_servack_uids.size(); i++) {
-    servacks->Set(i, ZUniqueIdToString(g_servack_uids[i]));
-  }
-  result->Set(0, hmacks);
-  result->Set(1, servacks);
-  g_hmack_uids.clear();
-  g_servack_uids.clear();
-  return scope.Close(result);
+  return scope.Close(ReturnSavedPackets());
 }
 
 /** DOWNCASE *********************************************/
@@ -662,12 +688,16 @@ void Init(Handle<Object> exports, Handle<Value> module) {
                FunctionTemplate::New(GetSender)->GetFunction());
   exports->Set(g_symbol_getRealm,
                FunctionTemplate::New(GetRealm)->GetFunction());
+  exports->Set(g_symbol_getDestAddr,
+               FunctionTemplate::New(GetDestAddr)->GetFunction());
   exports->Set(g_symbol_setNoticeCallback,
                FunctionTemplate::New(SetNoticeCallback)->GetFunction());
   exports->Set(g_symbol_sendNotice,
                FunctionTemplate::New(SendNotice)->GetFunction());
   exports->Set(g_symbol_formatNotice,
                FunctionTemplate::New(FormatNotice)->GetFunction());
+  exports->Set(g_symbol_parseNotice,
+               FunctionTemplate::New(ParseNotice)->GetFunction());
   exports->Set(g_symbol_subscriptions,
                FunctionTemplate::New(Subscriptions)->GetFunction());
   exports->Set(g_symbol_downcase,
