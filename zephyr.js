@@ -228,10 +228,10 @@ zephyr.parseNotice = function(buf) {
 
 internal.setNoticeCallback(function(err, notice) {
   if (err) {
-    zephyr.emit("error", err);
+    console.error('Zephyr packet error', err);
     return;
   }
-  zephyr.emit("notice", notice);
+  zephyr.emit('notice', notice);
 });
 
 module.exports = zephyr;
