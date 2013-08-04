@@ -92,7 +92,12 @@ function sendPackets(packets) {
     // everything, including a sendto.
     sock = dgram.createSocket('udp4');
     sock.on('message', function(msg, rinfo) {
-      var notice = internal.parseNotice(msg);
+      try {
+        var notice = zephyr.parseNotice(msg);
+      } catch (err) {
+        console.error('Received bad packet on outgoing socket', err);
+        return;
+      }
 
       var uid;
       if (notice.kind === zephyr.HMACK) {
@@ -211,7 +216,15 @@ zephyr.cancelSubscriptions = function(cb) {
 };
 
 zephyr.formatNotice = internal.formatNotice;
-zephyr.parseNotice = internal.parseNotice;
+
+zephyr.parseNotice = function(buf) {
+  // Okay, what the hell, zephyr? Why does ZParseNotice not check that
+  // the buffer has enough size of the ZVERSIONHDR. This is not
+  // something for the caller to do.
+  if (buf.length < 4)
+    throw "Packet too short";
+  return internal.parseNotice(buf);
+};
 
 internal.setNoticeCallback(function(err, notice) {
   if (err) {
