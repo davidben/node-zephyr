@@ -84,7 +84,8 @@ function internalSendNotice(msg, certRoutine) {
 var sock;
 var hmackTable = { };
 var servackTable = { };
-function sendPackets(packets) {
+
+function ensureSocketInitialized() {
   // Lazily initialize the sending packet. Meh.
   if (!sock) {
     // We create our own socket to send on and listen for ACKs on
@@ -118,53 +119,79 @@ function sendPackets(packets) {
       }
     });
   }
+}
 
-  // To avoid the kernel dropping packets, send the packets one at a
-  // time, waiting for HMACKs between each.
-  var sendAndHmack = packets.reduce(function(soFar, pkt) {
-    var kind = pkt.kind;
-    var uid = pkt.uid;
-    var buffer = pkt.buffer;
-    return soFar.then(function() {
-      var dest = zephyr.getDestAddr();
-      var ret = Q.ninvoke(sock, 'send',
-                          buffer, 0, buffer.length,
-                          dest.port, dest.host);
-      // Make sure the buffer is not held by the next closure. Silly
-      // stuff with how V8 implements closures.
-      buffer = null;
-      return ret;
-    }).then(function() {
-      if (kind === zephyr.UNACKED || kind === zephyr.UNSAFE) {
-        hmackTable[uid] = Q.defer();
-        return hmackTable[uid].promise;
-      }
-      return Q();
+function sendPacket(pkt) {
+  ensureSocketInitialized();
+
+  var hmack, servack;
+  var waitHmack = true, waitServack = true;
+  if (pkt.kind === zephyr.UNACKED) {
+    hmack = (hmackTable[pkt.uid] = Q.defer());
+    servack = Q.defer(); waitServack = false;
+  } else if (pkt.kind === zephyr.ACKED) {
+    hmack = (hmackTable[pkt.uid] = Q.defer());
+    servack = (servackTable[pkt.uid] = Q.defer());
+  } else {
+    hmack = Q.defer(); waitHmack = false;
+    servack = Q.defer(); waitServack = false;
+  }
+
+  // Send the packet.
+  var uid = pkt.uid;
+  var dest = zephyr.getDestAddr();
+  Q.ninvoke(
+    sock, 'send',
+    pkt.buffer, 0, pkt.buffer.length,
+    dest.port, dest.host
+  ).then(function() {
+    // If we weren't going to wait, resolve HMACK and SERVACK now.
+    if (!waitHmack)
+      hmack.resolve();
+    if (!waitServack)
+      servack.resolve();
+
+    // TODO(davidben): Time out the hmack and the servack.
+  }, function(err) {
+    // We failed to send. Reject hmack and servack.
+    hmack.reject(err);
+    servack.reject(err);
+    if (waitHmack)
+      delete hmackTable[pkt.uid];
+    if (waitServack)
+      delete servackTable[pkt.uid];
+  }).done();
+
+  return {
+    hmack: hmack.promise,
+    servack: servack.promise
+  };
+}
+
+function sendPackets(packets) {
+  var acks = packets.reduce(function(acksSoFar, pkt) {
+    // To avoid the kernel dropping packets, wait for HMACKs between
+    // each packet.
+    var send = acksSoFar.hmack.then(function() {
+      return sendPacket(pkt);
     });
-  }, Q());
-
-  // TODO(davidben): Have all of these time out appropriately, and
-  // whatnot. Also if an HMACK times out, there's no hope for the
-  // SERVACK, so punt it too.
-
-  // SERVACK
-  var servack = Q.all(packets.filter(function(pkt) {
-    return pkt.kind == zephyr.ACKED;
-  }).map(function(pkt) {
-    servackTable[pkt.uid] = Q.defer();
-    return servackTable[pkt.uid].promise;
-  })).then(function(ret) {
-    // Just return the first fragment's result I guess...
-    return ret[0];
-  });
+    return {
+      hmack: send.get('hmack'),
+      servack: acksSoFar.servack.then(function() {
+        // Assume all servacks have the same body, so just return the
+        // last one. Meh.
+        return send.get('servack');
+      })
+    };
+  }, { hmack: Q(), servack: Q() });
 
   return {
     // This assumes that the send_function is called by ZSrvSendPacket
     // in the right order. A pretty safe assumption. If it ever
     // breaks, we can return a third thing easily enough.
-    uid: packets[0].uid,
-    hmack: sendAndHmack,
-    servack: servack,
+    uid: packets.length ? packets[0].uid : null,
+    hmack: acks.hmack,
+    servack: acks.servack
   };
 };
 
