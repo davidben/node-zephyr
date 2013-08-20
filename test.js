@@ -7,7 +7,7 @@ function subscribe() {
   console.log('Subscribing to %s %s', cls, inst);
   zephyr.subscribeTo([ [ cls, inst, '*' ] ], function(err) {
     if (err) {
-      console.dir(err);
+      console.error('Could not subscribe', err);
       return;
     }
     console.log('Subscribed to %s %s', cls, inst);
@@ -23,13 +23,13 @@ function subscribe() {
         ]
       }, zephyr.ZAUTH, function(err) {
         if (err) {
-	  console.dir(err);
+	  console.error('Failed to send notice', err);
 	  return;
         }
         console.log('got HMACK');
       }).on('servack', function(err, msg) {
         if (err) {
-	  console.dir('got SERVNAK', err);
+	  console.error('got SERVNAK', err);
 	  return;
         }
         console.log('got SERVACK', msg);
