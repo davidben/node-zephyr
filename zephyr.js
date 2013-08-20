@@ -56,10 +56,11 @@ zephyr.getDestAddr = internal.getDestAddr;
 
 zephyr.downcase = internal.downcase;
 
-function OutgoingNotice(uid, hmack, servack) {
+function OutgoingNotice(uid, packets, hmack, servack) {
   events.EventEmitter.call(this);
 
   this.uid = uid;
+  this.packets = packets;
   Q.nodeify(hmack, this.emit.bind(this, 'hmack'));
   Q.nodeify(servack, this.emit.bind(this, 'servack'));
 }
@@ -241,7 +242,8 @@ function sendPackets(packets) {
   var hmack = Q.defer();
   var servack = Q.defer();
 
-  var outgoing = new OutgoingNotice(uid, hmack.promise, servack.promise);
+  var outgoing = new OutgoingNotice(uid, packets.length,
+                                    hmack.promise, servack.promise);
 
   var servackResult = null;
 
@@ -258,6 +260,7 @@ function sendPackets(packets) {
 
         acks.hmack.then(function() {
           hmacksPending--;
+          outgoing.emit('hmackprogress', i - hmacksPending);
           loop();
         }, function(err) {
           // Ack! Reject everything.
@@ -270,6 +273,7 @@ function sendPackets(packets) {
 
         acks.servack.then(function(ret) {
           servacksPending--;
+          outgoing.emit('servackprogress', i - servacksPending);
           servackResult = ret;
           loop();
         }, function(err) {
@@ -330,19 +334,19 @@ function zephyrCtl(opcode, subs, cb) {
 }
 
 zephyr.subscribeTo = function(subs, cb) {
-  zephyrCtl(zephyr.CLIENT_SUBSCRIBE, subs, cb);
+  return zephyrCtl(zephyr.CLIENT_SUBSCRIBE, subs, cb);
 };
 
 zephyr.subscribeToSansDefaults = function(subs, cb) {
-  zephyrCtl(zephyr.CLIENT_SUBSCRIBE_NODEFS, subs, cb);
+  return zephyrCtl(zephyr.CLIENT_SUBSCRIBE_NODEFS, subs, cb);
 };
 
 zephyr.unsubscribeTo = function(subs, cb) {
-  zephyrCtl(zephyr.CLIENT_UNSUBSCRIBE, subs, cb);
+  return zephyrCtl(zephyr.CLIENT_UNSUBSCRIBE, subs, cb);
 };
 
 zephyr.cancelSubscriptions = function(cb) {
-  zephyrCtl(zephyr.CLIENT_CANCELSUB, [], cb);
+  return zephyrCtl(zephyr.CLIENT_CANCELSUB, [], cb);
 };
 
 zephyr.formatNotice = internal.formatNotice;
