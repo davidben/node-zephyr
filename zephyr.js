@@ -234,9 +234,14 @@ function sendPacket(pkt) {
 var MAX_PACKETS_IN_FLIGHT = 50;
 
 function sendPackets(packets) {
+  // This assumes that the send_function is called by ZSrvSendPacket
+  // in the right order. A pretty safe assumption. If it ever breaks,
+  // we can return a third thing easily enough.
   var uid = packets.length ? packets[0].uid : null;
   var hmack = Q.defer();
   var servack = Q.defer();
+
+  var outgoing = new OutgoingNotice(uid, hmack.promise, servack.promise);
 
   var servackResult = null;
 
@@ -288,19 +293,11 @@ function sendPackets(packets) {
 
   loop();
 
-  return {
-    // This assumes that the send_function is called by ZSrvSendPacket
-    // in the right order. A pretty safe assumption. If it ever
-    // breaks, we can return a third thing easily enough.
-    uid: uid,
-    hmack: hmack.promise,
-    servack: servack.promise
-  };
+  return outgoing;
 };
 
 zephyr.sendNotice = function(msg, certRoutine, onHmack) {
-  var acks = internalSendNotice(msg, certRoutine);
-  var ev = new OutgoingNotice(acks.uid, acks.hmack, acks.servack);
+  var ev = internalSendNotice(msg, certRoutine);
   if (onHmack)
     ev.once('hmack', onHmack);
   return ev;
@@ -326,7 +323,10 @@ function zephyrCtl(opcode, subs, cb) {
     return;
   }
 
-  Q.nodeify(sendPackets(packets).servack, cb);
+  var ev = sendPackets(packets);
+  if (cb)
+    ev.once('servack', cb);
+  return ev;
 }
 
 zephyr.subscribeTo = function(subs, cb) {
