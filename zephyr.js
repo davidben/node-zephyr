@@ -85,6 +85,62 @@ var sock;
 var hmackTable = { };
 var servackTable = { };
 
+var HM_TIMEOUT = 10 * 1000;  // From zephyr.h
+var SERV_TIMEOUT = 60 * 1000;  // From Z_ReadWait.
+
+function TimeoutError() {
+  Error.captureStackTrace(this, TimeoutError);
+}
+util.inherits(TimeoutError, Error);
+TimeoutError.prototype.toString = function() {
+  return "Timeout";
+};
+
+function AckTimer(table, timeout) {
+  this.table_ = table;
+  this.timeout_ = timeout;
+
+  this.oldBuf_ = [];
+  this.newBuf_ = [];
+
+  this.interval_ = null;
+}
+AckTimer.prototype.tick_ = function() {
+  // Expire oldBuf_.
+  for (var i = 0; i < this.oldBuf_.length; i++) {
+    var uid = this.oldBuf_[i][0], deferred = this.oldBuf_[i][1];
+    if (this.table_[uid] === deferred) {
+      deferred.reject(new TimeoutError());
+      delete this.table_[uid];
+    }
+  }
+  // Cycle buffers.
+  this.oldBuf_ = this.newBuf_;
+  this.newBuf_ = [];
+
+  if (this.oldBuf_.length == 0) {
+    clearInterval(this.interval_);
+    this.interval_ = null;
+  }
+};
+AckTimer.prototype.addUid = function(uid) {
+  var deferred = this.table_[uid];
+  // It's... conceivable we raced with the ACK in installing the
+  // timeout since we wait until the packet is sent to install the
+  // timeout.
+  if (!deferred)
+    return;
+  this.newBuf_.push([uid, deferred]);
+  if (this.interval_ == null) {
+    this.oldBuf_ = this.newBuf_;
+    this.newBuf_ = [];
+    this.interval_ = setInterval(this.tick_.bind(this), this.timeout_);
+  }
+};
+
+var hmackTimer = new AckTimer(hmackTable, HM_TIMEOUT);
+var servackTimer = new AckTimer(servackTable, SERV_TIMEOUT);
+
 function ensureSocketInitialized() {
   // Lazily initialize the sending packet. Meh.
   if (!sock) {
@@ -145,13 +201,17 @@ function sendPacket(pkt) {
     pkt.buffer, 0, pkt.buffer.length,
     dest.port, dest.host
   ).then(function() {
-    // If we weren't going to wait, resolve HMACK and SERVACK now.
-    if (!waitHmack)
+    if (!waitHmack) {
       hmack.resolve();
-    if (!waitServack)
-      servack.resolve();
+    } else {
+      hmackTimer.addUid(uid);
+    }
 
-    // TODO(davidben): Time out the hmack and the servack.
+    if (!waitServack) {
+      servack.resolve();
+    } else {
+      servackTimer.addUid(uid);
+    }
   }, function(err) {
     // We failed to send. Reject hmack and servack.
     hmack.reject(err);
