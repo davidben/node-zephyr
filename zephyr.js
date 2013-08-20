@@ -228,30 +228,73 @@ function sendPacket(pkt) {
   };
 }
 
+// Okay, this is dumb. rmem_default and rmem_max are 229376 which
+// gives a bit over 200 packets in the buffer. Use 50 as a
+// suuuper-conservative estimate.
+var MAX_PACKETS_IN_FLIGHT = 50;
+
 function sendPackets(packets) {
-  var acks = packets.reduce(function(acksSoFar, pkt) {
-    // To avoid the kernel dropping packets, wait for HMACKs between
-    // each packet.
-    var send = acksSoFar.hmack.then(function() {
-      return sendPacket(pkt);
-    });
-    return {
-      hmack: send.get('hmack'),
-      servack: acksSoFar.servack.then(function() {
-        // Assume all servacks have the same body, so just return the
-        // last one. Meh.
-        return send.get('servack');
-      })
-    };
-  }, { hmack: Q(), servack: Q() });
+  var uid = packets.length ? packets[0].uid : null;
+  var hmack = Q.defer();
+  var servack = Q.defer();
+
+  var servackResult = null;
+
+  packets = packets.slice(0);  // Make a copy...
+  var hmacksPending = 0, servacksPending = 0;
+  var i = 0, aborted = false;
+  function loop() {
+    if (!aborted) {
+      while (hmacksPending < MAX_PACKETS_IN_FLIGHT && i < packets.length) {
+        // Send out a packet.
+        var acks = sendPacket(packets[i]);
+        packets[i] = null;  // Meh. Release the buffer when we can.
+        hmacksPending++; servacksPending++; i++;
+
+        acks.hmack.then(function() {
+          hmacksPending--;
+          loop();
+        }, function(err) {
+          // Ack! Reject everything.
+          if (Q.isPending(hmack.promise))
+            hmack.reject(err);
+          if (Q.isPending(servacksPending))
+            servack.reject(err)
+          aborted = true;
+        }).done();
+
+        acks.servack.then(function(ret) {
+          servacksPending--;
+          servackResult = ret;
+          loop();
+        }, function(err) {
+          if (Q.isPending(servacksPending))
+            servack.reject(err)
+          aborted = true;
+        }).done();
+      }
+    }
+
+    // End condition.
+    if (i >= packets.length) {
+      if (hmacksPending == 0 && Q.isPending(hmack.promise)) {
+        hmack.resolve();
+      }
+      if (servacksPending == 0 && Q.isPending(servack.promise)) {
+        servack.resolve(servackResult);
+      }
+    }
+  }
+
+  loop();
 
   return {
     // This assumes that the send_function is called by ZSrvSendPacket
     // in the right order. A pretty safe assumption. If it ever
     // breaks, we can return a third thing easily enough.
-    uid: packets.length ? packets[0].uid : null,
-    hmack: acks.hmack,
-    servack: acks.servack
+    uid: uid,
+    hmack: hmack.promise,
+    servack: servack.promise
   };
 };
 
