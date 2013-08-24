@@ -230,9 +230,9 @@ function sendPacket(pkt) {
 }
 
 // Okay, this is dumb. rmem_default and rmem_max are 229376 which
-// gives a bit over 200 packets in the buffer. Use 25 as a
-// suuuper-conservative estimate.
-var MAX_PACKETS_IN_FLIGHT = 25;
+// gives a bit over 200 packets in the buffer. Use 10 as a
+// suuuper-conservative estimate. There seems to be more going on.
+var MAX_PACKETS_IN_FLIGHT = 10;
 
 function sendPackets(packets) {
   // This assumes that the send_function is called by ZSrvSendPacket
