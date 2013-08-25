@@ -114,7 +114,6 @@ AckTable.prototype.rotateTables_ = function() {
   this.newTableCount_ = 0;
 };
 AckTable.prototype.tick_ = function() {
-  console.log('tick_');
   // Expire oldTable_.
   for (var key in this.oldTable_) {
     this.oldTable_[key].reject(new TimeoutError());
