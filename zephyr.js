@@ -230,9 +230,11 @@ function sendPacket(pkt) {
 }
 
 // Okay, this is dumb. rmem_default and rmem_max are 229376 which
-// gives a bit over 200 packets in the buffer. Use 10 as a
+// gives a bit over 200 packets in the buffer. Use 25 as a
 // suuuper-conservative estimate. There seems to be more going on.
-var MAX_PACKETS_IN_FLIGHT = 10;
+//
+// For more fun, go all the way to servack before sendin another.
+var MAX_PACKETS_IN_FLIGHT = 25;
 
 function sendPackets(packets) {
   // This assumes that the send_function is called by ZSrvSendPacket
@@ -252,7 +254,7 @@ function sendPackets(packets) {
   var i = 0, aborted = false;
   function loop() {
     if (!aborted) {
-      while (hmacksPending < MAX_PACKETS_IN_FLIGHT && i < packets.length) {
+      while (servacksPending < MAX_PACKETS_IN_FLIGHT && i < packets.length) {
         // Send out a packet.
         var acks = sendPacket(packets[i]);
         packets[i] = null;  // Meh. Release the buffer when we can.
