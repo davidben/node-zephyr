@@ -83,8 +83,6 @@ function internalSendNotice(msg, certRoutine) {
 }
 
 var sock;
-var hmackTable = { };
-var servackTable = { };
 
 var HM_TIMEOUT = 10 * 1000;  // From zephyr.h
 var SERV_TIMEOUT = 60 * 1000;  // From Z_ReadWait.
@@ -97,50 +95,77 @@ TimeoutError.prototype.toString = function() {
   return "Timeout";
 };
 
-function AckTimer(table, timeout) {
-  this.table_ = table;
+function AckTable(timeout) {
   this.timeout_ = timeout;
 
-  this.oldBuf_ = [];
-  this.newBuf_ = [];
+  this.oldTable_ = {};
+  this.oldTableCount_ = 0;
+  this.newTable_ = {};
+  this.newTableCount_ = 0;
 
   this.interval_ = null;
 }
-AckTimer.prototype.tick_ = function() {
-  // Expire oldBuf_.
-  for (var i = 0; i < this.oldBuf_.length; i++) {
-    var uid = this.oldBuf_[i][0], deferred = this.oldBuf_[i][1];
-    if (this.table_[uid] === deferred) {
-      deferred.reject(new TimeoutError());
-      delete this.table_[uid];
-    }
+AckTable.prototype.rotateTables_ = function() {
+  if (this.oldTableCount_ != 0)
+    throw "Rotating with non-zero oldTableCount_!";
+  this.oldTable_ = this.newTable_;
+  this.oldTableCount_ = this.newTableCount_;
+  this.newTable_ = {};
+  this.newTableCount_ = 0;
+};
+AckTable.prototype.tick_ = function() {
+  console.log('tick_');
+  // Expire oldTable_.
+  for (var key in this.oldTable_) {
+    this.oldTable_[key].reject(new TimeoutError());
   }
-  // Cycle buffers.
-  this.oldBuf_ = this.newBuf_;
-  this.newBuf_ = [];
+  this.oldTableCount_ = 0;
+  this.rotateTables_();
 
-  if (this.oldBuf_.length == 0) {
+  if (this.oldTableCount_ == 0) {
     clearInterval(this.interval_);
     this.interval_ = null;
   }
 };
-AckTimer.prototype.addUid = function(uid) {
-  var deferred = this.table_[uid];
-  // It's... conceivable we raced with the ACK in installing the
-  // timeout since we wait until the packet is sent to install the
-  // timeout.
-  if (!deferred)
-    return;
-  this.newBuf_.push([uid, deferred]);
+AckTable.prototype.addUid = function(uid) {
+  if (uid in this.newTable_) {
+    // This shouldn't happen...
+    return Q.reject("Repeat UID!");
+  }
+  var deferred = Q.defer();
+  this.newTable_[uid] = deferred;
+  this.newTableCount_++;
   if (this.interval_ == null) {
-    this.oldBuf_ = this.newBuf_;
-    this.newBuf_ = [];
+    this.rotateTables_();
     this.interval_ = setInterval(this.tick_.bind(this), this.timeout_);
+  }
+  return deferred.promise;
+};
+AckTable.prototype.resolve = function(uid, value) {
+  if (uid in this.newTable_) {
+    this.newTable_[uid].resolve(value);
+    delete this.newTable_[uid];
+    this.newTableCount_--;
+  } else if (uid in this.oldTable_) {
+    this.oldTable_[uid].resolve(value);
+    delete this.oldTable_[uid];
+    this.oldTableCount_--;
+  }
+};
+AckTable.prototype.reject = function(uid, err) {
+  if (uid in this.newTable_) {
+    this.newTable_[uid].reject(err);
+    delete this.newTable_[uid];
+    this.newTableCount_--;
+  } else if (uid in this.oldTable_) {
+    this.oldTable_[uid].reject(err);
+    delete this.oldTable_[uid];
+    this.oldTableCount_--;
   }
 };
 
-var hmackTimer = new AckTimer(hmackTable, HM_TIMEOUT);
-var servackTimer = new AckTimer(servackTable, SERV_TIMEOUT);
+var hmackTable = new AckTable(HM_TIMEOUT);
+var servackTable = new AckTable(SERV_TIMEOUT);
 
 function ensureSocketInitialized() {
   // Lazily initialize the sending packet. Meh.
@@ -160,19 +185,13 @@ function ensureSocketInitialized() {
       var uid;
       if (notice.kind === zephyr.HMACK) {
         uid = notice.uid;
-        if (hmackTable[uid])
-          hmackTable[uid].resolve(null);
-        delete hmackTable[uid];
+        hmackTable.resolve(uid, null);
       } else if (notice.kind === zephyr.SERVACK) {
         uid = notice.uid;
-        if (servackTable[uid])
-          servackTable[uid].resolve(notice.body[0]);
-        delete servackTable[uid];
+        servackTable.resolve(uid, notice.body[0]);
       } else if (notice.kind === zephyr.SERVNAK) {
         uid = notice.uid;
-        if (servackTable[uid])
-          servackTable[uid].reject(new Error(notice.body[0]));
-        delete servackTable[uid];
+        servackTable.reject(uid, new Error(notice.body[0]));
       }
     });
   }
@@ -181,17 +200,12 @@ function ensureSocketInitialized() {
 function sendPacket(pkt) {
   ensureSocketInitialized();
 
-  var hmack, servack;
-  var waitHmack = true, waitServack = true;
+  var waitHmack = false, waitServack = false;
   if (pkt.kind === zephyr.UNACKED) {
-    hmack = (hmackTable[pkt.uid] = Q.defer());
-    servack = Q.defer(); waitServack = false;
+    waitHmack = true;
   } else if (pkt.kind === zephyr.ACKED) {
-    hmack = (hmackTable[pkt.uid] = Q.defer());
-    servack = (servackTable[pkt.uid] = Q.defer());
-  } else {
-    hmack = Q.defer(); waitHmack = false;
-    servack = Q.defer(); waitServack = false;
+    waitHmack = true;
+    waitServack = true;
   }
 
   // Send the packet.
@@ -202,30 +216,18 @@ function sendPacket(pkt) {
     pkt.buffer, 0, pkt.buffer.length,
     dest.port, dest.host
   ).then(function() {
-    if (!waitHmack) {
-      hmack.resolve();
-    } else {
-      hmackTimer.addUid(uid);
-    }
-
-    if (!waitServack) {
-      servack.resolve();
-    } else {
-      servackTimer.addUid(uid);
-    }
+    if (!waitHmack)
+      hmackTable.resolve(uid);
+    if (!waitServack)
+      servackTable.resolve(uid);
   }, function(err) {
-    // We failed to send. Reject hmack and servack.
-    hmack.reject(err);
-    servack.reject(err);
-    if (waitHmack)
-      delete hmackTable[pkt.uid];
-    if (waitServack)
-      delete servackTable[pkt.uid];
+    hmackTable.reject(uid, err);
+    servackTable.reject(uid, err);
   }).done();
 
   return {
-    hmack: hmack.promise,
-    servack: servack.promise
+    hmack: hmackTable.addUid(pkt.uid),
+    servack: servackTable.addUid(pkt.uid)
   };
 }
 
