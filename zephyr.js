@@ -269,7 +269,7 @@ function sendPackets(packets) {
           // Ack! Reject everything.
           if (Q.isPending(hmack.promise))
             hmack.reject(err);
-          if (Q.isPending(servacksPending))
+          if (Q.isPending(servack.promise))
             servack.reject(err)
           aborted = true;
         }).done();
@@ -280,7 +280,7 @@ function sendPackets(packets) {
           servackResult = ret;
           loop();
         }, function(err) {
-          if (Q.isPending(servacksPending))
+          if (Q.isPending(servack.promise))
             servack.reject(err)
           aborted = true;
         }).done();
