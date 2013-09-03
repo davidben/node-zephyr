@@ -329,6 +329,8 @@ Local<Object> ZephyrToObject(ZNotice_t *notice) {
 }
 
 void OnZephyrFDReady(uv_poll_t* handle, int status, int events) {
+  HandleScope scope;
+
   Local<Function> callback = Local<Function>::New(g_on_msg);
   struct sockaddr_in from;
   ZNotice_t notice;
