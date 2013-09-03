@@ -247,36 +247,6 @@ Handle<Value> GetDestAddr(const Arguments& args) {
 
 /*[ CHECK ]*******************************************************************/
 
-Local<String> TransliterateString(unsigned short charset,
-                                  const char *str,
-                                  int len) {
-  const char *charset_str = ZCharsetToString(charset);
-  // Assume UNKNOWN charset is UTF-8. zwgc seems to assume it is
-  // ISO-8859-1 in X11 mode and assume it's the same as the tty
-  // charset (so UTF-8 for sane environemnts).
-  if (!strcmp(charset_str, "UNKNOWN") ||
-      !strcmp(charset_str, "UTF-8")) {
-    return String::New(str, len);
-  }
-  // Convert to UTF-8 first.
-  char *out_str;
-  int out_len;
-  Code_t ret = ZTransliterate(const_cast<char*>(str), len,
-                              const_cast<char*>(charset_str),
-                              const_cast<char*>("UTF-8"),
-                              &out_str, &out_len);
-  if (ret != 0) {
-    // Failed to ZTransliterate. Just assume UTF-8 again.
-    return String::New(str, len);
-  }
-
-  // Yay. Now all 5 zephyrs sent with an explicit ISO-8859-1 charset
-  // will get handled correctly. Whatever.
-  Local<String> result = String::New(out_str, out_len);
-  free(out_str);
-  return result;
-}
-
 Local<Object> ZephyrToObject(ZNotice_t *notice) {
   Local<Object> target = Object::New();
 
@@ -312,9 +282,8 @@ Local<Object> ZephyrToObject(ZNotice_t *notice) {
     const char* nul = static_cast<const char*>(
         memchr(notice->z_message + offset, 0, notice->z_message_len - offset));
     int nul_offset = nul ? (nul - notice->z_message) : notice->z_message_len;
-    body->Set(i, TransliterateString(notice->z_charset,
-                                     notice->z_message + offset,
-                                     nul_offset - offset));
+    body->Set(i, String::New(notice->z_message + offset,
+                             nul_offset - offset));
     offset = nul_offset + 1;
   }
   target->Set(g_symbol_body, body);
